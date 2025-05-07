@@ -42,17 +42,17 @@ MemPrOD is intended to run on either CG or atomostic PDB files and will output t
   
 * Deformations.pdb - A pdb file containing a reprensentation of the deformations only.
   
-* Bot.png - A height map of the deformations in the lower leaflet.
+* Deformations_Lower.png - A height map of the deformations in the lower leaflet.
   
-* Top.png - As above but for the upper leaflet.
+* Deformations_Upper.png - As above but for the upper leaflet.
   
-* BotC.png - A graph of the charge in the lower leaflet, calculated after deformations.
+* Charge_Lower.png - A graph of the charge in the lower leaflet, calculated after deformations.
   
-* TopC.png - As above but for the upper leaflet.
+* Charge_Upper.png - As above but for the upper leaflet.
   
-* Potential_Bot.png - A graph of the potential of each membrane segment in the lower leaflet.
+* Potential_Lower.png - A graph of the potential of each membrane segment in the lower leaflet.
   
-* Potential_Top.png - As above but fot the upper leaflet.
+* Potential_Upper.png - As above but fot the upper leaflet.
   
 * Run_command.txt - A text file containg the full run command for later reference.
 
