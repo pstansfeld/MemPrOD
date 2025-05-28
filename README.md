@@ -38,9 +38,9 @@ MemPrOD is intended to run on either CG or atomostic PDB files and will output t
       
     * Surface.pdb - A pdn file showing the surface beads calculated. Again, mostly for debugging
       
-* AcylTail_contacts.pdb - A pdb file of the original input with b-factors as acyl tail contacts.
+* AcylTail_contacts.pdb - A pdb file of the original input with b-factors as acyl tail contacts. This is still WIP.
   
-* HeadGroup_contacts.pdb - As above but with b-factors as head group contacts.
+* HeadGroup_contacts.pdb - As above but with b-factors as head group contacts. This is still WIP.
   
 * Deformations.pdb - A pdb file containing a reprensentation of the deformations only.
   
