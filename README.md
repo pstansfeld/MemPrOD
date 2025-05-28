@@ -1,5 +1,5 @@
 # MemPrOD
-MemPrOD: Membrane Protein Orientation and Distortions is a program the predicts the distortions of a lipid bilayer around a membrane protein. The paper associated with is code is available [here]. 
+MemPrOD: Membrane Protein Orientation and Distortions is a program the predicts the distortions of a lipid bilayer around a membrane protein. The paper associated with this code is available [here]. 
 
 Parameters from the following were used to help write this code:
 
