@@ -109,6 +109,8 @@ This will take a few minutes to run and will create a folder called "Deformation
 
 We can compare this to the deformations shown on MemProtMD, and we see good agreement in general, with MemPrOD over prediciting thinning on the lower leaflet slightly.
 
+![Alt text](Tutorial_Pics/Fig1.svg)
+
 ## FAQ
 There are currently no frequently asked questions. If you do have any questions or encounter errors that you cannot fix please contact me via my email m.parrag@warwick.ac.uk and I will do my best to provide help.
 
