@@ -260,6 +260,54 @@ def lj(r,min_pos):
 	ret_val = 4*(jnp.power((min_pos/r),12)-jnp.power((min_pos/r),6))
 	return ret_val
 	
+
+def get_loop_inds(n,nx,ny):
+	indsx = np.arange(nx-2*n+2)+(n-1)
+	indsy = np.arange(ny-2*n+2)+(n-1)
+	y0 = np.zeros(nx-2*n+2)+indsy[0]
+	yn = np.zeros(nx-2*n+2)+indsy[-1]
+	p0 = np.zeros(nx-2*n+2)-1
+	pp0 = np.zeros(nx-2*n+2)
+	pp0[0] += 1
+	pp0[-1] -= 1
+	pn = np.zeros(nx-2*n+2)+1
+	line1 = np.concatenate((indsx[:,None],y0[:,None],pp0[:,None],pn[:,None]),axis=1)
+	line2 = np.concatenate((indsx[:,None],yn[:,None],pp0[:,None],p0[:,None]),axis=1)
+	x0 = np.zeros(ny-2*n)+indsx[0]
+	xn = np.zeros(ny-2*n)+indsx[-1]
+	p0 = np.zeros(ny-2*n)-1
+	pp0 = np.zeros(ny-2*n)
+	pn = np.zeros(ny-2*n)+1
+	line3 = np.concatenate((x0[:,None],indsy[1:-1,None],pn[:,None],pp0[:,None]),axis=1)
+	line4 = np.concatenate((xn[:,None],indsy[1:-1,None],p0[:,None],pp0[:,None]),axis=1)
+	return np.concatenate((line1,line2,line3,line4))
+	
+def get_all_loop_inds(k,nx,ny):
+	all_inds = np.empty((0,4))
+	for i in range(k):
+		all_inds = np.concatenate((get_loop_inds(i+1,nx,ny),all_inds))
+	return all_inds
+
+def get_new_zs(new_zs,loop_inds):
+	nx = new_zs.shape[0]
+	ny = new_zs.shape[1]
+	def loop1(new_zs,ind):
+		inder = jnp.array(loop_inds[ind],dtype=int)
+		ix = inder[0]
+		iy = inder[1]
+		inderm1 = inder.at[:2].set(inder[:2]+inder[2:])
+		ixl = inderm1[0]
+		iyl = inderm1[1]
+		new_zs = new_zs.at[ix,iy,0].set(new_zs[ix,iy,0]+new_zs[ixl,iyl,0])
+		return new_zs , ind
+	new_zs,_ = jax.lax.scan(loop1,new_zs,jnp.arange(loop_inds.shape[0]))
+	return new_zs
+	
+	
+	
+	
+		
+	
 #Sigmoid function
 @jax.jit	
 def sj(x,grad):
@@ -596,6 +644,9 @@ rad = int(4.0/grid_den)
 grid_size_x = int(2*x_ext/grid_den)
 grid_size_y = int(2*y_ext/grid_den)
 
+loop_inds = jnp.array(get_all_loop_inds(12,grid_size_x,grid_size_y))
+loop_inds_end = np.array(get_loop_inds(1,grid_size_x,grid_size_y),dtype=int)
+
 nxx = jnp.array(x_ext/cutoff,dtype=int)
 nyy = jnp.array(y_ext/cutoff,dtype=int)
 
@@ -832,6 +883,21 @@ LT1_B_mins = int_data[5]
 LT2_B_mins = int_data[6]
 Charge_B_mins =int_data[7]
 
+#Prevents gaps between protein and membrane
+def intbgrid(ind2,ind3,zt,mt,zd):
+	mem_structure = get_mem_struc(mt)
+	z_disp = zt+zd
+	logs = jnp.linspace(mem_structure[0],mem_structure[-1],10)
+	sumer = 0
+	def z_range(sumer,ind):
+		zr = logs[ind]+z_disp
+		sumer += bgrid_weight(ind2,ind3,zr)
+		return sumer, ind
+	sumer,_ =jax.lax.scan(z_range,sumer,jnp.arange(10))
+	return (sj(-sumer+4,3))*(-sumer-200)/5.0
+		
+
+
 #Potential function. If surface bead or membrane segment is within the protein it's contribution is ignored
 def get_pot(ind2,ind3,zt,mt,zd):
 	no_beads = grid[ind2,ind3,-1,0]
@@ -864,11 +930,12 @@ def get_pot(ind2,ind3,zt,mt,zd):
 		tot = jax.lax.cond(bind > -1e-1,nomin,miner,tot)
 		return tot,ind
 	def edge():
-		return (zt*zt)*1e-2+((mt-mem_data[1])*(mt-mem_data[1]))*1e-2
+		return (zt*zt)*1e-7+((mt-mem_data[1])*(mt-mem_data[1]))*1e-7
 	def nedge():
 		return (zt*zt)*1e-6+((mt-mem_data[1])*(mt-mem_data[1]))*1e-6
 	s_val = jax.lax.cond(jnp.logical_or(jnp.logical_or(ind3==0,ind3==grid.shape[1]-1),jnp.logical_or(ind2==0,ind2==grid.shape[0]-1)),edge,nedge)
 	tot,_ = jax.lax.scan(calc_grid3,jnp.array([s_val,s_val]),jnp.arange(max_beads))	
+	tot += intbgrid(ind2,ind3,zt,mt,zd)
 	return tot,no_beads
 		
 #Calculates contacts with head groups and acyl tails		
@@ -929,7 +996,6 @@ int_mat = jnp.array([[PhtoPh,PhtoH,PhtoW],[PhtoH,HtoH,HtoW],[PhtoW,HtoW,WtoW]])
 @jax.jit
 def rpot_col(new_zs,inda1,indb1,inda2,indb2,dist,zd,k1):
 	dist = jnp.sqrt((inda1-inda2)*(inda1-inda2)+(indb1-indb2)*(indb1-indb2))
-	
 	def close():
 	
 	
@@ -1014,6 +1080,7 @@ def rpot_col(new_zs,inda1,indb1,inda2,indb2,dist,zd,k1):
 #calculates the full potential due to membrane-membrane interactions
 @jax.jit
 def nbh_calc(new_zs,k,k2,zd):
+	new_zs = get_new_zs(new_zs,loop_inds)
 	grad_grid = jnp.zeros((grid_size_x,grid_size_y,2))
 	def nbh_grad_calc1(grad_grid,ind2):
 		def nbh_grad_calc2(grad_grid,ind3):
@@ -1050,6 +1117,7 @@ def nbh_calc(new_zs,k,k2,zd):
 #calculates the potential over all membrane segments
 @jax.jit
 def calc_graphs(xy,zd):
+	xy = get_new_zs(xy,loop_inds)
 	grid_vals = jnp.zeros((grid_size_x,grid_size_y,2))
 	def calc_grid(grid_vals,ind):
 		ind2 = ind
@@ -1103,6 +1171,7 @@ def nwrap_grad(in_xy):
 new_zs = jnp.zeros((grid_size_x,grid_size_y,2))
 new_zs = new_zs.at[:,:,1].set(mem_data[1])
 start_z = float(args.zshift)*5
+start_oz = 0
 
 
 print("Misc..")
@@ -1122,6 +1191,10 @@ while try_again:
 	new_zs = min_out.x[:grid_size_x*grid_size_y*2]
 	start_z = min_out.x[-1]
 	new_zs = new_zs.reshape((grid_size_x,grid_size_y,2))
+	new_zs = np.array(get_new_zs(jnp.array(new_zs),loop_inds))
+	total_z = np.mean(new_zs[loop_inds_end[:,0],loop_inds_end[:,1],0])
+	new_zs[:,:,0] -= total_z
+	start_z += total_z*5
 	if(min_out.status == 2):
 		try_again = False
 	elif(min_out.status == 1):
