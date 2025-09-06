@@ -7,8 +7,8 @@ Parameters from the following were used to help write this code:
 Siewert J ; Marrink et al. “The MARTINI force field The MARTINI Force Field: Coarse Grained Model for Biomolecular Simulations”. In: (2007). [Paper](https://pubs.acs.org/doi/10.1021/jp071097f)
 
 ## Installation
-To install MemPrOD run the following (Not yet on PyPi, this will work once the code has been published):
->pip install MemPrO
+To install MemPrOD run the following:
+>pip install memprod
 
 This will install MemPrO, Insane4MemPrO and MemPrOD.
 
@@ -89,7 +89,7 @@ MemPrOD will takes the following flags as input:
 
 ## An example
 
-MemPrOD is a very simply code to use, here we will go through a quick example. The first step will be to download an exmaple integral membrane protein, let us choose 4BWZ from the protein data bank. We will be downloading this from MemProtMD rather than the protein data bank. Go to [this page](https://memprotmd.bioch.ox.ac.uk/_ref/PDB/4bwz/_sim/4bwz_default_dppc/) and download "4bwz_default_dppc-head-contacts.pdb" rename this to "4bwz.pdb". Create a folder called "MemPrOD_Example" and place "4bwz.pdb" in this folder. 
+MemPrOD is a very simply code to use, here we will go through a quick example. The first step will be to download an exmaple integral membrane protein, let us choose 4BWZ from the protein data bank. We will be downloading this from MemProtMD rather than the protein data bank. Go to [this page](https://memprotmd.bioch.ox.ac.uk/_ref/PDB/4bwz/_sim/4bwz_default_dppc/) and download "4bwz_default_dppc-head-contacts.pdb" rename this to "4bwz.pdb". Create a folder called "MemPrOD_Example" and place "4bwz.pdb" in this folder. **NOTE: If installing with pip than "MemPrO" and "MemPrOD" can be used to run the code instead of the full path as shown in the example and tutorials below.**
 
 Before we can predict deforamtions we will first need to orient the protein. If you are unfiamilar with MemPrO then take a look at the [MemPrO tutorials](https://github.com/ShufflerBardOnTheEdge/MemPrO/blob/main/MemPrO_tutorials.md). We can orient by running the following command in "MemPrOD_Example".
 
