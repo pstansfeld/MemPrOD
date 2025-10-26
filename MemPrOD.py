@@ -2,7 +2,6 @@ import os
 import sys
 import warnings
 import jax.numpy as jnp
-from jax.config import config
 from jax import tree_util
 import jax
 import jax.profiler
@@ -19,65 +18,9 @@ from scipy.optimize import minimize
 
 
 
-#We define some enumerations for use later
-class Reses(Enum):
-	ALA = 0
-	GLY = 1
-	ILE = 2
-	LEU = 3
-	PRO = 4
-	VAL = 5
-	PHE = 6
-	TYR = 7
-	TRP = 8
-	ARG = 9
-	LYS = 10
-	HIS = 11
-	SER = 12
-	THR = 13
-	ASP = 14
-	GLU = 15
-	ASN = 16
-	GLN = 17
-	CYS = 18
-	MET = 19
-	
-class Beads(Enum):
-	BB =  0
-	SC1 = 1
-	SC2 = 2
-	SC3 = 3
-	SC4 = 4
-	SC5 = 5
-	SC6 = 6
-	
-class Beadtype(Enum):
-	SP2 = 0 #p4
-	TC3 = 1 #p4
-	SP1 = 2 #P1
-	P2 = 3 #p5
-	SC2 = 4 #AC2
-	SP2a = 5 #p5
-	SC3 = 6 #c3
-	SC4 = 7 #SC5
-	TC5 = 8 #SC5
-	TC4 = 9 #SC4
-	TN6 = 10 #SP1
-	TN6d = 11 #SNd
-	SQ3p = 12 #Qp
-	SQ4p = 13 #Qp
-	TN5a = 14 #SP1
-	TP1 = 15 #P1
-	SQ5n = 16 #Qa
-	Q5n = 17 #Qa
-	TC6 = 18 #c5
-	C6 = 19 #c5
-	P5 = 20 #p5
-	SP5 = 21 #p4
-	GHOST = 22
 warnings.filterwarnings('ignore')
 os.environ["TF_CPP_MIN_LOG_LEVEL"]="3"
-config.update("jax_enable_x64",True)
+jax.config.update("jax_enable_x64",True)
 
 martini_default_path = os.environ["PATH_TO_MARTINI"]
 
@@ -109,10 +52,31 @@ parser.add_argument("-mt","--membrane_thickness",help="Initial thickness of memb
 parser.set_defaults(membrane_thickness=38.0)
 parser.add_argument("-wb","--write_bfactors",action="store_true",help="Toggle writing charge at each membrane segment instead of z position.")
 parser.set_defaults(write_bfactors=False)
+parser.add_argument("-res","--additional_residues",help="Comma seperate list of additional residues in input files (eg: POPG) Note the only ATOM entries will be read, all HETATM entries will be ignored.")
+parser.set_defaults(additional_residues="")
+parser.add_argument("-res_itp","--additional_residues_itp_file",help="Path to the itp file describing all additional residues, and bead types associated to beads in the residue. A CG representation is required, for atomisitic inputs an additional file is required which describes the beading.")
+parser.set_defaults(additional_residues_itp_file="")
+parser.add_argument("-res_cg","--residue_cg_file",help="Folder that contains a files of name RES.pdb describing the beading for each additional RES - see CG2AT github for examples")
+parser.set_defaults(residue_cg_file="")
 args = parser.parse_args()
 
 #Error checking user inputs
-
+add_reses = args.additional_residues.split(",")
+if(len(add_reses) > 0):
+	if(len(add_reses[0]) > 0):
+		print("Using additional residues:",", ".join(add_reses))
+		if args.additional_residues_itp_file == "":
+			print("ERROR: Additional residue itp is required if using additional residues.")
+			exit()
+		if args.residue_cg_file == "":
+			print("WARNING: You have not added beading information for the added residues, this will cause an error if orienting a atomisitic input.")
+			
+if(len(add_reses) > 0):
+	if(len(add_reses[0]) > 0):
+		for i in add_reses:
+			ori.add_Reses(i,args.additional_residues_itp_file)
+			if len(args.residue_cg_file) > 0 :
+				ori.add_AtomToBeads(args.residue_cg_file.lstrip("/")+"/"+i+".pdb")
 mem_data = [0,0]
 
 try:
@@ -234,17 +198,14 @@ def write_protein(bfacs,fn,ofn):
 	out_file = open(ofn,"w")
 	bc = 0
 	for c in n_lines:
-		if(len(c) > 46):
-			if("[" not in c and c[:4]=="ATOM"):				
-				bbp = np.format_float_positional(bfacs[map_to_beads[bc]],precision=3)
-				bbp += "0"*(3-len((bbp.split(".")[1])))
-				new_c = c[:60]+(" "*(8-len(bbp)))+bbp+c[68:]
-				bc+=1
-				out_file.write(new_c)
-			else:
-				out_file.write(c)
+		if len(c) > 54 and "[" not in c and c.startswith("ATOM"):			
+			bbp = np.format_float_positional(bfacs[map_to_beads[bc]],precision=3)
+			bbp += "0"*(3-len((bbp.split(".")[1])))
+			new_c = c[:60]+(" "*(8-len(bbp)))+bbp+c[68:]
+			bc+=1
+			out_file.write(new_c)
 		else:
-			out_file.write(c)	
+			out_file.write(c)
 	out_file.close()
 	
 	
@@ -384,15 +345,17 @@ def get_int_strength(bead_1,bead_2,martini_file):
 	
 #Gets the interations between protein beads and the enviroment. This is used to create the mean fields		
 def get_mem_def(martini_file):
+	Beadtype_names = list(Beadtype.keys())
+	no_beadtypes = len(Beadtype_names)
 	#We use interactions strengths from martini using a POPE(Q4p)/POPG(P4)/POPC(Q1)? lipid as a template
-	W_B_mins = jnp.array([get_int_strength("W",Beadtype(i).name,martini_file)-get_int_strength("W",Beadtype(i).name,martini_file) for i in range(23)])
-	LH1_B_mins = jnp.array([get_int_strength("P4",Beadtype(i).name,martini_file)-get_int_strength("W",Beadtype(i).name,martini_file) for i in range(23)])
-	LH2_B_mins = jnp.array([get_int_strength("Q5",Beadtype(i).name,martini_file)-get_int_strength("W",Beadtype(i).name,martini_file) for i in range(23)])
-	LH3_B_mins = jnp.array([get_int_strength("SN4a",Beadtype(i).name,martini_file)-get_int_strength("W",Beadtype(i).name,martini_file) for i in range(23)])
-	LH4_B_mins = jnp.array([get_int_strength("N4a",Beadtype(i).name,martini_file)-get_int_strength("W",Beadtype(i).name,martini_file) for i in range(23)])
-	LT1_B_mins = jnp.array([get_int_strength("C1",Beadtype(i).name,martini_file)-get_int_strength("W",Beadtype(i).name,martini_file) for i in range(23)])
-	LT2_B_mins = jnp.array([get_int_strength("C4h",Beadtype(i).name,martini_file)-get_int_strength("W",Beadtype(i).name,martini_file) for i in range(23)])
-	Charge_B_mins =jnp.array([0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,-1,-1,0,0,0,0,0],dtype="float64")
+	W_B_mins = jnp.array([get_int_strength("W",Beadtype_names[i],martini_file)-get_int_strength("W",Beadtype_names[i],martini_file) for i in range(no_beadtypes)])
+	LH1_B_mins = jnp.array([get_int_strength("P4",Beadtype_names[i],martini_file)-get_int_strength("W",Beadtype_names[i],martini_file) for i in range(no_beadtypes)])
+	LH2_B_mins = jnp.array([get_int_strength("Q5",Beadtype_names[i],martini_file)-get_int_strength("W",Beadtype_names[i],martini_file) for i in range(no_beadtypes)])
+	LH3_B_mins = jnp.array([get_int_strength("SN4a",Beadtype_names[i],martini_file)-get_int_strength("W",Beadtype_names[i],martini_file) for i in range(no_beadtypes)])
+	LH4_B_mins = jnp.array([get_int_strength("N4a",Beadtype_names[i],martini_file)-get_int_strength("W",Beadtype_names[i],martini_file) for i in range(no_beadtypes)])
+	LT1_B_mins = jnp.array([get_int_strength("C1",Beadtype_names[i],martini_file)-get_int_strength("W",Beadtype_names[i],martini_file) for i in range(no_beadtypes)])
+	LT2_B_mins = jnp.array([get_int_strength("C4h",Beadtype_names[i],martini_file)-get_int_strength("W",Beadtype_names[i],martini_file) for i in range(no_beadtypes)])
+	Charge_B_mins =jnp.array([0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,-1,-1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],dtype="float64")
 							# 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5  6  7 8 9 0 1 2							   # #
 	return (W_B_mins,LH1_B_mins,LH2_B_mins,LH3_B_mins,LH4_B_mins,LT1_B_mins,LT2_B_mins,Charge_B_mins)
 	
@@ -522,7 +485,7 @@ def calc_esf(start_z,grid_in,grid_ban,nx,ny,exx,exy,cposes,ctypes):
 def calc_esf_p(pos,cposes,ctypes):
 	ctypes = jnp.array(ctypes,dtype=int)
 	charge_const = 92.64
-	Charge_B_mins =jnp.array([0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,-1,-1,0,0,0,0,0],dtype="float64")
+	Charge_B_mins =jnp.array([0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,-1,-1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],dtype="float64")
 	def esf_loop(carry,ind):
 		charge_cont = Charge_B_mins[ctypes[ind]]*charge_const/jnp.linalg.norm(pos-cposes[ind])
 		carry += charge_cont
@@ -547,6 +510,8 @@ timer = time.time()
 jax.block_until_ready(PDB_helper_test.get_surface())
 PDB_helper_test.recenter_bvals()
 data = PDB_helper_test.get_data()
+
+Beadtype = ori.Beadtype
 int_data = get_mem_def(martini_file)
 print("Done in:", str(np.format_float_positional(time.time()-timer,precision=3))+"s")
 
@@ -634,9 +599,8 @@ poses = poses[indexer2]
 
 cutoff = int(args.cutoff)
 
-x_ext = max(-jnp.min(surf_poses[:,0]),jnp.max(surf_poses[:,0]))+20
-y_ext = max(-jnp.min(surf_poses[:,1]),jnp.max(surf_poses[:,1]))+20
-
+x_ext = max(-jnp.min(surf_poses[:,0]),jnp.max(surf_poses[:,0]))+25
+y_ext = max(-jnp.min(surf_poses[:,1]),jnp.max(surf_poses[:,1]))+25
 grid_den = float(args.grid_density)
 
 rad = int(4.0/grid_den)
@@ -1228,10 +1192,10 @@ write_protein(bfacs_at,fn,orient_dir+"AcylTail_contacts.pdb")
 gc = calc_esf(start_z,new_zs,grid_ban,grid_size_x,grid_size_y,x_ext,y_ext,cposes,ctypes)
 potg = get_pot_graph(min_out.x)
 plt.imshow(potg[:,:,0])
-plt.savefig(orient_dir+"Potential_Upper.png")
+plt.savefig(orient_dir+"Potential_Upper.svg")
 plt.clf()
 plt.imshow(potg[:,:,1])
-plt.savefig(orient_dir+"Potential_Lower.png")
+plt.savefig(orient_dir+"Potential_Lower.svg")
 plt.clf()
 
 
@@ -1239,10 +1203,10 @@ BotBan, TopBan = write_pdb(start_z,new_zs,grid_ban,grid_size_x,grid_size_y,x_ext
 
 print("Z change:",np.format_float_positional(start_z/5.0,precision=3))
 plt.imshow((new_zs[:,:,0]+0.5*new_zs[:,:,1])*TopBan)
-plt.savefig(orient_dir+"Deformations_Upper.png")
+plt.savefig(orient_dir+"Deformations_Upper.svg")
 plt.clf
 plt.imshow((new_zs[:,:,0]-0.5*new_zs[:,:,1])*BotBan)
-plt.savefig(orient_dir+"Deformations_Lower.png")
+plt.savefig(orient_dir+"Deformations_Lower.svg")
 plt.clf
 
 
@@ -1252,10 +1216,10 @@ print("Done in:", str(np.format_float_positional(time.time()-timer,precision=3))
 
 
 plt.imshow(gc[:,:,0]*BotBan)
-plt.savefig(orient_dir+"Charge_Lower.png")
+plt.savefig(orient_dir+"Charge_Lower.svg")
 plt.clf
 plt.imshow(gc[:,:,1]*TopBan)
-plt.savefig(orient_dir+"Charge_Upper.png")
+plt.savefig(orient_dir+"Charge_Upper.svg")
 plt.clf
 
 
