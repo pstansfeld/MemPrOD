@@ -87,6 +87,12 @@ MemPrOD will takes the following flags as input:
 
 -wb, --write_bfactors : Toggles the writing of charge at each membrane segment rather than thinning/thickening.
 
+-res, --additional_residues : A comma seperated list of additional residues present in the input file (eg POPE,POPG)
+
+-res_itp, --additional_residues_itp_file : An itp file containing descriptions of each additional residue added.
+
+-res_cg, --residue_cg_file : A folder containing files called RES.pdb where RES is the name of each additional residue added. RES.pdb should contain coarse graining information, example can be found on the GitHub repo for [CG2AT](https://github.com/owenvickery/cg2at/tree/master/database/fragments/martini_3-0_slipids/non_protein). This is only required for atomistic inputs with additional residues.
+
 ## An example
 
 MemPrOD is a very simply code to use, here we will go through a quick example. The first step will be to download an exmaple integral membrane protein, let us choose 4BWZ from the protein data bank. We will be downloading this from MemProtMD rather than the protein data bank. Go to [this page](https://memprotmd.bioch.ox.ac.uk/_ref/PDB/4bwz/_sim/4bwz_default_dppc/) and download "4bwz_default_dppc-head-contacts.pdb" rename this to "4bwz.pdb". Create a folder called "MemPrOD_Example" and place "4bwz.pdb" in this folder. **NOTE: If installing with pip than "MemPrO" and "MemPrOD" can be used to run the code instead of the full path as shown in the example and tutorials below.**
