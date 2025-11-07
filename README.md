@@ -16,9 +16,9 @@ Otherwise, clone the GitHub repository. Python 3.11.5 or better is required, and
 * Jax 0.4.30 (As JAX is in constant development at the time of writing do not use any other versions, as MemPrOD may no longer work as intended)
 >pip install jax\["cpu"\]==0.4.30
 * Matplotlib 3.8.4
->pip install matplotlib==3.8.4
+>pip install matplotlib>=3.8.4
 * Scipy 1.11.3
->pip install scipy==1.11.3
+>pip install scipy>=1.11.3
 
 MemPrO is required. Follows the instructions [here](https://github.com/ShufflerBardOnTheEdge/MemPrO) to install MemPrO. MemPrOD should be placed in the same folder as MemPrO.py.
 
