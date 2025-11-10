@@ -14,7 +14,7 @@ This will install MemPrO, Insane4MemPrO and MemPrOD.
 
 Otherwise, clone the GitHub repository. Python 3.11.5 or better is required, and the following packages need to be installed
 * Jax 0.4.30 (As JAX is in constant development at the time of writing do not use any other versions, as MemPrOD may no longer work as intended)
->pip install jax\["cpu"\]==0.4.30
+>pip install jax\["cpu"\]<=0.4.30,<0.6.1
 * Matplotlib 3.8.4
 >pip install matplotlib>=3.8.4
 * Scipy 1.11.3
