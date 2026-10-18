@@ -10,21 +10,12 @@ Siewert J ; Marrink et al. “The MARTINI force field The MARTINI Force Field: C
 To install MemPrOD run the following:
 >pip install memprod
 
-This will install MemPrO, Insane4MemPrO and MemPrOD.
+This will install MemPrO, Insane4MemPrO and MemPrOD. For NVIDIA GPU support in the MemPrO parts (Linux, CUDA 12), use:
+>pip install "memprod[gpu]"
 
-Otherwise, clone the GitHub repository. Python 3.11.5 or better is required, and the following packages need to be installed
-* Jax 0.4.30 (As JAX is in constant development at the time of writing do not use any other versions, as MemPrOD may no longer work as intended)
->pip install jax\["cpu"\]<=0.4.30,<0.6.1
-* Matplotlib 3.8.4
->pip install matplotlib>=3.8.4
-* Scipy 1.11.3
->pip install scipy>=1.11.3
+Otherwise, clone the GitHub repository and install it with `pip install .` from the repository folder. Python 3.11 or later is required; this installs MemPrO 0.2.0 or later, JAX (0.6.0–0.11) and SciPy.
 
-MemPrO is required. Follows the instructions [here](https://github.com/ShufflerBardOnTheEdge/MemPrO) to install MemPrO. MemPrOD should be placed in the same folder as MemPrO.py.
-
-A Martini3 forcefield is also required, this can be downloaded from [here](https://cgmartini.nl/docs/downloads/force-field-parameters/martini3/particle-definitions.html) 
-
-Before running MemPrOD the follwoing environment variable must be set, for Linux users the following lines can be run.
+The Martini 3 force field bundled with MemPrO is used by default. To use a different one, supply it with `-itp`, or set the following environment variable (for Linux users):
 
 >export PATH_TO_MARTINI=PATH/TO/MARTINI3
 
@@ -73,7 +64,7 @@ MemPrOD will takes the following flags as input:
 
 -ncav, --no_cavity_surface : This toggles the use of a more expensive but more accurate surface finder. By default the more expensive algorithm is used but this flag will turn it off.
 
--itp, --itp_file : Path to a Martini3 forcefield. By default this is the enviroment variable PATH_TO_MARTINI
+-itp, --itp_file : Path to a Martini3 forcefield. By default this is the enviroment variable PATH_TO_MARTINI if set, otherwise the force field bundled with MemPrO
 
 -cut, --cutoff : This is the cutoff for interactions between membrane segments and protein beads. It is not reccommended to change this. (Default: 12)
 

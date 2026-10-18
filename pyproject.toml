@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memprod"
+version = "0.1.0"
+authors = [{name = "Matyas Parrag",email="matyas.parrag@gmail.com"}]
+description = "A program for the prediction of local membrane deformations around a protein"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["mempro >= 0.2.0","scipy >= 1.11.3"]
+classifiers = ["Programming Language :: Python :: 3"]
+license = "GPL-3.0"
+license-files = ["LICEN[CS]E*"]
+
+[project.optional-dependencies]
+# NVIDIA GPU support for the MemPrO parts (Linux, CUDA 12)
+gpu = ["mempro[gpu] >= 0.2.0"]
+
+[project.scripts]
+MemPrOD = "memprod:MemPrOD.main"
+
+[project.urls]
+Homepage = "https://github.com/ShufflerBardOnTheEdge/MemPrOD"
+Issues = "https://github.com/ShufflerBardOnTheEdge/MemPrOD/issues"
