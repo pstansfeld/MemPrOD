@@ -515,24 +515,17 @@ def main():
 		return BanGrid[:,:,0],BanGrid[:,:,1]
 		
 	#calcualtes the eleectrostatic force using below
+	#All lower/upper head positions of all grid cells are evaluated together; cells outside the membrane stay 0
 	def calc_esf(start_z,grid_in,grid_ban,nx,ny,exx,exy,cposes,ctypes):
-		grid_in = np.array(grid_in)
-		grid_charge = np.zeros((nx,ny,2))
-		count = 0
+		grid_in = jnp.array(grid_in)
 		xs = np.linspace(-exx,exx,nx)
 		ys = np.linspace(-exy,exy,ny)
-		for i in range(nx):
-			for j in range(ny):
-				if(grid_ban[i,j] == 1):
-					ms = get_mem_struc(grid_in[i,j,1])
-					z_pluss = [ms[0],ms[7]]
-					for nn,zz in enumerate(z_pluss):
-						zp = zz+start_z/5
-						x_pos = xs[i]
-						y_pos = ys[j]
-						z_pos = grid_in[i,j,0]+zp
-						grid_charge[i][j][nn] = calc_esf_p(jnp.array([x_pos,y_pos,z_pos]),cposes,ctypes)
-		return grid_charge
+		ms = jax.vmap(jax.vmap(get_mem_struc))(grid_in[:,:,1])
+		z_pos = jnp.stack((grid_in[:,:,0]+(ms[:,:,0]+start_z/5),grid_in[:,:,0]+(ms[:,:,7]+start_z/5)),axis=2)
+		x_pos,y_pos = np.meshgrid(xs,ys,indexing="ij")
+		pos = jnp.stack((jnp.broadcast_to(x_pos[:,:,None],z_pos.shape),jnp.broadcast_to(y_pos[:,:,None],z_pos.shape),z_pos),axis=3).reshape(-1,3)
+		charge = np.array(jax.lax.map(lambda p: calc_esf_p(p,cposes,ctypes),pos,batch_size=256)).reshape(nx,ny,2)
+		return np.where(np.array(grid_ban)[:,:,None] == 1,charge,0.0)
 			
 	#calcues the electrostatic force
 	@jax.jit			
@@ -540,12 +533,7 @@ def main():
 		ctypes = jnp.array(ctypes,dtype=int)
 		charge_const = 92.64
 		Charge_B_mins =jnp.array([0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,-1,-1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],dtype="float64")
-		def esf_loop(carry,ind):
-			charge_cont = Charge_B_mins[ctypes[ind]]*charge_const/jnp.linalg.norm(pos-cposes[ind])
-			carry += charge_cont
-			return carry,ind
-		tot_c,_ = jax.lax.scan(esf_loop,0,jnp.arange(cposes.shape[0]))
-		return tot_c		
+		return jnp.sum(Charge_B_mins[ctypes]*charge_const/jnp.linalg.norm(pos-cposes,axis=1))
 							
 						
 	
@@ -914,39 +902,29 @@ def main():
 		return tot,no_beads
 			
 	#Calculates contacts with head groups and acyl tails		
+	#Vectorised over protein beads and the 40 tail samples; grid cells are processed in batches to bound memory
+	@jax.jit
 	def calc_contacts(new_zs,poses,zdisp,xs,ys):
-		bfacsH = jnp.zeros(poses.shape[0])
-		bfacsT = jnp.zeros(poses.shape[0])
 		mindd = 3
-		def ccloop1(bfacs,ind1):
-			def ccloop2(bfacs,ind2):
-				mt = new_zs[ind1,ind2,1]
-				z = new_zs[ind1,ind2,0]
-				pos1 = jnp.array([xs[ind1],ys[ind2],z-mt/2.0-4+zdisp])
-				pos2 = jnp.array([xs[ind1],ys[ind2],z+mt/2.0+4+zdisp])
-				def ccloop3(bfacs,ind3):
-					bfacsH = bfacs[0]
-					bfacsT = bfacs[1]
-					posprot = poses[ind3]
-					dist1 = jnp.linalg.norm(posprot-pos1)/10
-					dist2 = jnp.linalg.norm(posprot-pos2)/10
-					
-					bfacsH = bfacsH.at[ind3].set(bfacsH[ind3]+jnp.exp(-jnp.max(jnp.array([dist1*dist1,mindd])))*bgrid_weight(ind1,ind2,z-mt/2.0+4+zdisp)+jnp.exp(-jnp.max(jnp.array([dist2*dist2,mindd])))*bgrid_weight(ind1,ind2,z-mt/2.0-4+zdisp))
-					zscan = jnp.linspace(pos1[2],pos2[2],40)
-					def ccloop4(bfacsT,ind4):
-						pos3 = pos1.copy()
-						pos3 = pos3.at[2].set(zscan[ind4])
-						dist3 = jnp.linalg.norm(posprot-pos3)/10
-						bfacsT = bfacsT.at[ind3].set(bfacsT[ind3]+jnp.exp(-jnp.max(jnp.array([dist3*dist3,mindd])))*bgrid_weight(ind1,ind2,zscan[ind4]))
-						return bfacsT,ind4
-					bfacsT,_ = jax.lax.scan(ccloop4,bfacsT,jnp.arange(40))
-					return (bfacsH,bfacsT),ind3
-				bfacs,_ = jax.lax.scan(ccloop3,bfacs,jnp.arange(poses.shape[0]))
-				return bfacs,ind2
-			bfacs,_ = jax.lax.scan(ccloop2,bfacs,jnp.arange(new_zs.shape[1]))
-			return bfacs,ind1
-		bfacs,_ = jax.lax.scan(ccloop1,(bfacsH,bfacsT),jnp.arange(new_zs.shape[0]))
-		return bfacs
+		cell_i,cell_j = np.meshgrid(np.arange(new_zs.shape[0]),np.arange(new_zs.shape[1]),indexing="ij")
+		cell_i,cell_j = jnp.array(cell_i.flatten()),jnp.array(cell_j.flatten())
+		def cell(ind):
+			ind1,ind2 = cell_i[ind],cell_j[ind]
+			mt = new_zs[ind1,ind2,1]
+			z = new_zs[ind1,ind2,0]
+			pos1 = jnp.array([xs[ind1],ys[ind2],z-mt/2.0-4+zdisp])
+			pos2 = jnp.array([xs[ind1],ys[ind2],z+mt/2.0+4+zdisp])
+			dist1 = jnp.linalg.norm(poses-pos1,axis=1)/10
+			dist2 = jnp.linalg.norm(poses-pos2,axis=1)/10
+			bfacH = jnp.exp(-jnp.maximum(dist1*dist1,mindd))*bgrid_weight(ind1,ind2,z-mt/2.0+4+zdisp)+jnp.exp(-jnp.maximum(dist2*dist2,mindd))*bgrid_weight(ind1,ind2,z-mt/2.0-4+zdisp)
+			zscan = jnp.linspace(pos1[2],pos2[2],40)
+			pos3 = jnp.stack((jnp.full(40,pos1[0]),jnp.full(40,pos1[1]),zscan),axis=1)
+			dist3 = jnp.linalg.norm(poses[:,None,:]-pos3[None,:,:],axis=2)/10
+			weights = jax.vmap(bgrid_weight,in_axes=(None,None,0))(ind1,ind2,zscan)
+			bfacT = jnp.sum(jnp.exp(-jnp.maximum(dist3*dist3,mindd))*weights[None,:],axis=1)
+			return bfacH,bfacT
+		bfacsH,bfacsT = jax.lax.map(cell,jnp.arange(cell_i.shape[0]),batch_size=16)
+		return jnp.sum(bfacsH,axis=0),jnp.sum(bfacsT,axis=0)
 					
 	PhtoW = get_int_strength("C1","W",martini_file)-get_int_strength("C1","W",martini_file)
 	PhtoPh = get_int_strength("C1","C1",martini_file)-get_int_strength("C1","W",martini_file)
