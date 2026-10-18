@@ -656,22 +656,18 @@ def main():
 	#Putting beads into bins for more efficient allocation of beads to membrane segments later on
 	print("Binning surface... (This could take a short while)")
 	timer = time.time()
-	@jax.jit
+	#Slot k of a grid cell holds the k-th bead (in index order) that falls in that cell; the last slot is the count
 	def allo_bead(surf_poses):
 		no_beads = surf_poses.shape[0]
-		big_grid = jnp.zeros((grid_size_x,grid_size_y,no_beads+1),dtype=int)-1
-		big_grid = big_grid.at[:,:,no_beads].set(0)
-		def allocacte_beads(big_grid,ind):
-			bind = ind
-			x_pos = surf_poses[bind][0]
-			y_pos = surf_poses[bind][1]
-			xgrid,ygrid = put_into_grid([x_pos,y_pos],[2*x_ext,2*y_ext],[nxx,nyy],[-x_ext,-y_ext])
-			big_grid = big_grid.at[xgrid,ygrid,big_grid[xgrid,ygrid,-1]].set(bind)
-			big_grid = big_grid.at[xgrid,ygrid,-1].set(big_grid[xgrid,ygrid,-1]+1)
-			return big_grid,ind
-		big_grid,_ = jax.lax.scan(allocacte_beads,big_grid,jnp.arange(no_beads))
-		return big_grid
-		
+		xgrid,ygrid = put_into_grid([surf_poses[:,0],surf_poses[:,1]],[2*x_ext,2*y_ext],[nxx,nyy],[-x_ext,-y_ext])
+		xgrid = np.array(xgrid)
+		ygrid = np.array(ygrid)
+		big_grid = np.zeros((grid_size_x,grid_size_y,no_beads+1),dtype=int)-1
+		big_grid[:,:,no_beads] = 0
+		for bind in range(no_beads):
+			big_grid[xgrid[bind],ygrid[bind],big_grid[xgrid[bind],ygrid[bind],-1]] = bind
+			big_grid[xgrid[bind],ygrid[bind],-1] += 1
+		return jnp.array(big_grid)
 	big_grid = allo_bead(surf_poses)
 	big_gridb = allo_bead(poses)
 	
@@ -697,39 +693,21 @@ def main():
 	indxes = indxes.reshape((grid_size_x*grid_size_y,2))
 	
 	def allo_grid_vmap(cutoff_val,big_grid,surf_poses):
-		max_beads = jnp.max(big_grid[:,:,-1])
+		max_beads = int(jnp.max(big_grid[:,:,-1]))
+		sq = jnp.array([[0,0],[-1,0],[1,0],[0,-1],[0,1],[-1,1],[-1,-1],[1,1],[1,-1]],dtype=int)
 		@partial(jax.vmap,in_axes=0)
 		def agrid_vmap(inds):
-			grid_p = jnp.zeros((no_beads+1,2),dtype=float)-1
-			grid_p = grid_p.at[no_beads,:].set(0)
 			ind2 = inds[0]
 			ind3 = inds[1]
 			indx,indy = put_into_grid([xs[ind2],ys[ind3]],[2*x_ext,2*y_ext],[nxx,nyy],[-x_ext,-y_ext])
-			sq = jnp.array([[0,0],[-1,0],[1,0],[0,-1],[0,1],[-1,1],[-1,-1],[1,1],[1,-1]],dtype=int)
-			def allocate_grid3(grid_p,ind):
-				def allocate_grid4(grid_p,sind):
-					bgind = big_grid[(indx+sq[sind,0])%grid_size_x,(indy+sq[sind,1])%grid_size_y][ind]
-					def close(grid_p,dist):
-						indeex = jnp.array(grid_p[-1,0],dtype=int)
-						grid_p = grid_p.at[indeex,0].set(bgind)
-						grid_p = grid_p.at[indeex,1].set(dist)
-						grid_p = grid_p.at[-1,0].set(grid_p[-1,0]+1)
-						return grid_p
-					def far(grid_p,dist):
-						return grid_p			
-					def is_bead(grid_p):
-						pos = surf_poses[bgind][0:2]
-						grid_pos = jnp.array([xs[ind2],ys[ind3]])
-						dist = jnp.linalg.norm(pos-grid_pos)
-						grid_p = jax.lax.cond(dist < cutoff_val, close,far,grid_p,dist)
-						return grid_p
-					def isn_bead(grid_p):
-						return grid_p
-					grid_p= jax.lax.cond(bgind != -1,is_bead,isn_bead,grid_p)
-					return grid_p,sind
-				grid_p,_ = jax.lax.scan(allocate_grid4,grid_p,jnp.arange(9))
-				return grid_p,ind
-			grid_p,_ = jax.lax.scan(allocate_grid3,grid_p,jnp.arange(max_beads))
+			#candidate (slot,neighbour) pairs in the order the original nested loops visited them
+			bginds = big_grid[(indx+sq[:,0])%grid_size_x,(indy+sq[:,1])%grid_size_y][:,:max_beads].T.reshape(-1)
+			dists = jnp.linalg.norm(surf_poses[bginds][:,0:2]-jnp.array([xs[ind2],ys[ind3]]),axis=1)
+			keep = (bginds != -1)*(dists < cutoff_val)
+			slot = jnp.where(keep,jnp.cumsum(keep)-1,no_beads+1)
+			grid_p = jnp.zeros((no_beads+1,2),dtype=float)-1
+			grid_p = grid_p.at[slot,0].set(bginds,mode="drop").at[slot,1].set(dists,mode="drop")
+			grid_p = grid_p.at[no_beads,0].set(jnp.sum(keep)).at[no_beads,1].set(0)
 			return grid_p
 		grid_p = agrid_vmap(indxes)
 		grid = grid_p.reshape((grid_size_x,grid_size_y,no_beads+1,2))
@@ -747,28 +725,16 @@ def main():
 	max_beads_block = jnp.array(jnp.max(grid_block[:,:,-1,0]),dtype=int)
 	bgrid = jnp.zeros((grid_size_x,grid_size_y,vert_grid_size))+1
 	
-	def gblock1(bgrid,ind):
-		ind2 = ind
-		def gblock2(bgrid,ind):
-			ind3 = ind
-			def bloop(bgrid,ind):
-				bind = jnp.array(grid_block[ind2,ind3,ind,0],dtype=int)
-				def mins(bgrid):
-					return bgrid
-				def nmins(bgrid):
-					atom_pos = poses[bind,2]
-					indap = jnp.array(((atom_pos+vext)/(2*vext))*vert_grid_size,dtype=int)
-					bgrid = bgrid.at[ind2,ind3,indap].set(0)
-					bgrid = bgrid.at[ind2,ind3,indap-1].set(0)
-					bgrid = bgrid.at[ind2,ind3,indap+1].set(0)
-					return bgrid
-				bgrid = jax.lax.cond(bind != -1,nmins,mins,bgrid)
-				return bgrid,ind
-			bgrid,_ = jax.lax.scan(bloop,bgrid,jnp.arange(max_beads_block))
-			return bgrid,ind
-		bgrid,_ = jax.lax.scan(gblock2,bgrid,jnp.arange(grid_size_y))
-		return bgrid,ind
-	bgrid,_ = jax.lax.scan(gblock1,bgrid,jnp.arange(grid_size_x))
+	#Every blocking bead clears the vertical cells indap-1, indap and indap+1 of its grid cell (order does not matter)
+	block_binds = jnp.array(grid_block[:,:,:max_beads_block,0],dtype=int)
+	block_ix,block_iy = np.meshgrid(np.arange(grid_size_x),np.arange(grid_size_y),indexing="ij")
+	block_ix = jnp.broadcast_to(block_ix[:,:,None],block_binds.shape)
+	block_iy = jnp.broadcast_to(block_iy[:,:,None],block_binds.shape)
+	indap = jnp.array(((poses[jnp.where(block_binds != -1,block_binds,0),2]+vext)/(2*vext))*vert_grid_size,dtype=int)
+	for shift in [0,-1,1]:
+		#indices are normalised and dropped by .at exactly as in the original per-bead updates; empty slots are dropped
+		zi = jnp.where(block_binds != -1,indap+shift,vert_grid_size)
+		bgrid = bgrid.at[block_ix,block_iy,zi].set(0,mode="drop")
 	
 				
 	mem_structure = get_mem_struc(mem_data[1])
@@ -825,19 +791,11 @@ def main():
 		rdic_carry,_ = jax.lax.scan(remove_disc,rdic_carry,-transp_arange+(numer-1))
 		return rdic_carry[:,2].reshape(grid_size_y,grid_size_x).T
 	
-	bgrid_o = jnp.zeros_like(bgrid)
-	
-	def fill_out_all(carry,ind):
-		bgrid = carry[0]
-		bgrid_o = carry[1]
-		tempb = fill_mid(1-accessable(bgrid[:,:,ind]),0.5)
-		bgrid_o = bgrid_o.at[:,:,ind].set(tempb)
-		bgrid = bgrid.at[:,:,ind].set(fill_mid(1-tempb,0.5))
-		return (bgrid,bgrid_o),ind
-		
-	carryb,_ = jax.lax.scan(fill_out_all,(bgrid,bgrid_o),jnp.arange(vert_grid_size))
-	bgrid = carryb[0]
-	bgrid_o = carryb[1]	
+	#Each height slice is filled independently, so all slices are processed together
+	def fill_out_slice(bslice):
+		tempb = fill_mid(1-accessable(bslice),0.5)
+		return fill_mid(1-tempb,0.5),tempb
+	bgrid,bgrid_o = jax.vmap(fill_out_slice,in_axes=2,out_axes=2)(bgrid)
 	
 	print("Done in:", str(np.format_float_positional(time.time()-timer,precision=3))+"s")
 	timer = time.time()
