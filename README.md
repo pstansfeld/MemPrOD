@@ -1,6 +1,8 @@
 # MemPrOD
 MemPrOD: Membrane Protein Orientation and Distortions is a program that predicts the distortions of a lipid bilayer around a membrane protein. A paper describing MemPrOD is in preparation; MemPrOD builds on MemPrO ([Parrag & Stansfeld, J. Chem. Theory Comput. 2025](https://doi.org/10.1021/acs.jctc.5c01433)). 
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/pstansfeld/MemPrO/blob/main/MemPrO_Colab.ipynb)
+
 Parameters from the following were used to help write this code:
 
 **Martini forcefield:**
@@ -18,6 +20,10 @@ Otherwise, clone the GitHub repository and install it with `pip install .` from 
 The Martini 3 force field bundled with MemPrO is used by default. To use a different one, supply it with `-itp`, or set the following environment variable (for Linux users):
 
 >export PATH_TO_MARTINI=PATH/TO/MARTINI3
+
+### Google Colab
+
+MemPrOD can be run without installing anything locally, using the [MemPrO Colab notebook](https://colab.research.google.com/github/pstansfeld/MemPrO/blob/main/MemPrO_Colab.ipynb). Tick **Run_MemPrOD** in its Settings cell, then use *Runtime → Run all*: the notebook orients the protein with MemPrO, runs MemPrOD on the top-ranked orientation (with MemPrO's dummy membrane removed), and shows the deformation maps. This covers single-membrane systems, as MemPrOD does.
 
 ## Outputs
 
