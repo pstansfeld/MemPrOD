@@ -5,16 +5,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memprod"
-version = "0.0.9"
+version = "0.1.0"
 authors = [{name = "Matyas Parrag",email="matyas.parrag@gmail.com"}]
 description = "A program for the prediction of local membrane deformations around a protein"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["argparse >= 1.4.0","mempro >= 0.0.9","scipy >= 1.11.3"]
+dependencies = ["mempro >= 0.2.0","scipy >= 1.11.3"]
 classifiers = ["Programming Language :: Python :: 3"]
 license = "GPL-3.0"
 license-files = ["LICEN[CS]E*"]
 
+[project.optional-dependencies]
+# NVIDIA GPU support for the MemPrO parts (Linux, CUDA 12)
+gpu = ["mempro[gpu] >= 0.2.0"]
 
 [project.scripts]
 MemPrOD = "memprod:MemPrOD.main"

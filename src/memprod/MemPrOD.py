@@ -12,8 +12,6 @@ import matplotlib.pyplot as plt
 import time
 from mempro import MemPrO as ori
 import argparse
-from jax.sharding import PositionalSharding
-from jax.experimental import mesh_utils
 from scipy.optimize import minimize
 
 	
@@ -22,7 +20,8 @@ def main():
 	os.environ["TF_CPP_MIN_LOG_LEVEL"]="3"
 	jax.config.update("jax_enable_x64",True)
 	
-	martini_default_path = os.environ["PATH_TO_MARTINI"]
+	#PATH_TO_MARTINI overrides the Martini 3 force field bundled with MemPrO
+	martini_default_path = os.environ.get("PATH_TO_MARTINI",os.path.join(os.path.dirname(ori.__file__),"martini_v3.itp"))
 	
 	#Reading command line args
 	parser = argparse.ArgumentParser(prog="MemPrOD",description="This is a program for the prediction of deformations caused by membrane proteins.")
