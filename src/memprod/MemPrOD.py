@@ -211,14 +211,8 @@ def main():
 	#lennard jones function with values <r cutoff	
 	@jax.jit
 	def lj(r,min_pos):
-		ret_val = 0
-		def lmp(r):
-			return min_pos*twopowsixth
-		def nlmp(r):
-			return r
-		r = jax.lax.cond(r<min_pos*twopowsixth,lmp,nlmp,r)
-		ret_val = 4*(jnp.power((min_pos/r),12)-jnp.power((min_pos/r),6))
-		return ret_val
+		r = jnp.maximum(r,min_pos*twopowsixth)
+		return 4*(jnp.power((min_pos/r),12)-jnp.power((min_pos/r),6))
 		
 	
 	def get_loop_inds(n,nx,ny):
@@ -248,19 +242,28 @@ def main():
 			all_inds = np.concatenate((get_loop_inds(i+1,nx,ny),all_inds))
 		return all_inds
 	
+	#Splits loop_inds into consecutive groups whose updates are independent of each other
+	#(no update reads or writes a cell written earlier in the same group), so each group can be
+	#applied as one vector update while giving the same result as updating one index at a time
+	def get_loop_groups(loop_inds):
+		inds = np.array(loop_inds,dtype=int)
+		groups = []
+		start = 0
+		written = set()
+		for n,(ix,iy,dx,dy) in enumerate(inds):
+			target = (ix,iy)
+			source = (ix+dx,iy+dy)
+			if target in written or source in written:
+				groups.append(inds[start:n])
+				start = n
+				written = set()
+			written.add(target)
+		groups.append(inds[start:])
+		return groups
+		
 	def get_new_zs(new_zs,loop_inds):
-		nx = new_zs.shape[0]
-		ny = new_zs.shape[1]
-		def loop1(new_zs,ind):
-			inder = jnp.array(loop_inds[ind],dtype=int)
-			ix = inder[0]
-			iy = inder[1]
-			inderm1 = inder.at[:2].set(inder[:2]+inder[2:])
-			ixl = inderm1[0]
-			iyl = inderm1[1]
-			new_zs = new_zs.at[ix,iy,0].set(new_zs[ix,iy,0]+new_zs[ixl,iyl,0])
-			return new_zs , ind
-		new_zs,_ = jax.lax.scan(loop1,new_zs,jnp.arange(loop_inds.shape[0]))
+		for g in get_loop_groups(loop_inds):
+			new_zs = new_zs.at[g[:,0],g[:,1],0].add(new_zs[g[:,0]+g[:,2],g[:,1]+g[:,3],0])
 		return new_zs
 		
 		
@@ -269,20 +272,9 @@ def main():
 			
 		
 	#Sigmoid function
-	@jax.jit	
+	@jax.jit
 	def sj(x,grad):
-		ret_val = -x*grad
-		def overflow_pos(ret_val):
-			ret_val = 100.0
-			return ret_val
-		def overflow_neg(ret_val):
-			ret_val = -100.0
-			return ret_val
-		def not_overflow(ret_val):
-			return ret_val
-		
-		ret_val = jax.lax.cond(-x*grad>100,overflow_pos,not_overflow,ret_val)
-		ret_val = jax.lax.cond(-x*grad<-100,overflow_neg,not_overflow,ret_val)
+		ret_val = jnp.clip(-x*grad,-100.0,100.0) #Avoids overflow in exp
 		return 1.0/(1.0+jnp.exp(ret_val))
 		
 	
@@ -804,35 +796,14 @@ def main():
 	print("Done in:", str(np.format_float_positional(time.time()-timer,precision=3))+"s")
 	timer = time.time()
 	
-	#This function indicates if grid point (i,j) and height z is within the protein. 
+	#This function indicates if grid point (i,j) and height z is within the protein.
 	@jax.jit
 	def bgrid_weight(i,j,z):
 		zind = ((z+vext)/(2*vext))*vert_grid_size
 		zind_l = jnp.array(jnp.floor(zind),dtype=int)-5
-		tot = 0
-		
-		def above(zindy):
-			return vert_grid_size-1
-		def below(zindy):
-			return 0
-		def nab(zindy):
-			return jnp.array(zindy,dtype=int)
-				
-		def bwloop(tot,ind):
-			zind_u = zind_l+ind
-			zind_u = jax.lax.cond(zind_u > vert_grid_size-1,above,nab,zind_u)
-			zind_u = jax.lax.cond(zind_u < 0,below,nab,zind_u)
-			tot += bgrid[i,j,zind_u]
-			
-			return tot,ind
-		tot,_ = jax.lax.scan(bwloop,tot,jnp.arange(10))
-		
-		zind_u = jax.lax.cond(zind_l+10 > vert_grid_size-1,above,nab,zind_l+10)
-		zind_u = jax.lax.cond(zind_l+10 < 0,below,nab,zind_l+10)
-		
-		zind_l = jax.lax.cond(zind_l > vert_grid_size-1,above,nab,zind_l)
-		zind_l = jax.lax.cond(zind_l < 0,below,nab,zind_l)
-		
+		tot = jnp.sum(bgrid[i,j,jnp.clip(zind_l+jnp.arange(10),0,vert_grid_size-1)])
+		zind_u = jnp.clip(zind_l+10,0,vert_grid_size-1)
+		zind_l = jnp.clip(zind_l,0,vert_grid_size-1)
 		tot += (bgrid[i,j,zind_u]-bgrid[i,j,zind_l])*(zind-zind_l-5)
 		return (1-jnp.cos(jnp.pi*(tot/10)))/2.0
 		
@@ -851,53 +822,31 @@ def main():
 		mem_structure = get_mem_struc(mt)
 		z_disp = zt+zd
 		logs = jnp.linspace(mem_structure[0],mem_structure[-1],10)
-		sumer = 0
-		def z_range(sumer,ind):
-			zr = logs[ind]+z_disp
-			sumer += bgrid_weight(ind2,ind3,zr)
-			return sumer, ind
-		sumer,_ =jax.lax.scan(z_range,sumer,jnp.arange(10))
+		sumer = jnp.sum(jax.vmap(bgrid_weight,in_axes=(None,None,0))(ind2,ind3,logs+z_disp))
 		return (sj(-sumer+4,3))*(-sumer-200)/5.0
 			
 	
 	
 	#Potential function. If surface bead or membrane segment is within the protein it's contribution is ignored
+	#Vectorised over bead slots: empty slots (index -1) and beads outside the cutoff are masked out
 	def get_pot(ind2,ind3,zt,mt,zd):
 		no_beads = grid[ind2,ind3,-1,0]
 		z_disp = zt+zd
-		def calc_grid3(tot,ind):
-			mem_structure = get_mem_struc(mt)
-			bind = jnp.array(grid[ind2,ind3,ind,0],dtype=int)
-			dist = grid[ind2,ind3,ind,1]
-			def nomin(tot):
-				z_pos = surf_poses[bind][2]-z_disp
-				xy_pos = surf_poses[bind][0:2]
-				indx,indy = put_into_grid([xy_pos[0],xy_pos[1]],[2*x_ext,2*y_ext],[nxx,nyy],[-x_ext,-y_ext])
-				bead_num = bead_types[bind]
-				disterz = jnp.sqrt(dist*dist)
-				def close(tot):
-					def upper(tot):
-						tot = tot.at[0].set(tot[0]+smj(z_pos,0.5,bead_num,mem_structure)*-1*lj(disterz,8.0)*bgrid_weight(ind2,ind3,z_pos)*bgrid_weight(indx,indy,z_pos))
-						return tot
-					def lower(tot):
-						tot = tot.at[1].set(tot[1]+smj(z_pos,0.5,bead_num,mem_structure)*-1*lj(disterz,8.0)*bgrid_weight(ind2,ind3,z_pos)*bgrid_weight(indx,indy,z_pos))
-						return tot
-					tot = jax.lax.cond(z_pos>0,upper,lower,tot)
-					return tot
-				def far(tot):
-					return tot
-				tot = jax.lax.cond((dist<float(args.cutoff))*(dist > 0),close,far,tot)
-				return tot
-			def miner(tot):
-				return tot
-			tot = jax.lax.cond(bind > -1e-1,nomin,miner,tot)
-			return tot,ind
-		def edge():
-			return (zt*zt)*1e-7+((mt-mem_data[1])*(mt-mem_data[1]))*1e-7
-		def nedge():
-			return (zt*zt)*1e-6+((mt-mem_data[1])*(mt-mem_data[1]))*1e-6
-		s_val = jax.lax.cond(jnp.logical_or(jnp.logical_or(ind3==0,ind3==grid.shape[1]-1),jnp.logical_or(ind2==0,ind2==grid.shape[0]-1)),edge,nedge)
-		tot,_ = jax.lax.scan(calc_grid3,jnp.array([s_val,s_val]),jnp.arange(max_beads))	
+		mem_structure = get_mem_struc(mt)
+		binds = jnp.array(grid[ind2,ind3,:int(max_beads),0],dtype=int)
+		dists = grid[ind2,ind3,:int(max_beads),1]
+		valid = binds > -1e-1
+		safe_binds = jnp.where(valid,binds,0)
+		z_pos = surf_poses[safe_binds,2]-z_disp
+		indx,indy = put_into_grid([surf_poses[safe_binds,0],surf_poses[safe_binds,1]],[2*x_ext,2*y_ext],[nxx,nyy],[-x_ext,-y_ext])
+		bead_num = bead_types[safe_binds]
+		disterz = jnp.sqrt(dists*dists)
+		contrib = (jax.vmap(smj,in_axes=(0,None,0,None))(z_pos,0.5,bead_num,mem_structure)*-1*jax.vmap(lj,in_axes=(0,None))(disterz,8.0)
+			*jax.vmap(bgrid_weight,in_axes=(None,None,0))(ind2,ind3,z_pos)*jax.vmap(bgrid_weight,in_axes=(0,0,0))(indx,indy,z_pos))
+		contrib = jnp.where(valid*(dists<float(args.cutoff))*(dists > 0),contrib,0.0)
+		edge = jnp.logical_or(jnp.logical_or(ind3==0,ind3==grid.shape[1]-1),jnp.logical_or(ind2==0,ind2==grid.shape[0]-1))
+		s_val = jnp.where(edge,1e-7,1e-6)*((zt*zt)+((mt-mem_data[1])*(mt-mem_data[1])))
+		tot = jnp.array([s_val+jnp.sum(jnp.where(z_pos>0,contrib,0.0)),s_val+jnp.sum(jnp.where(z_pos>0,0.0,contrib))])
 		tot += intbgrid(ind2,ind3,zt,mt,zd)
 		return tot,no_beads
 			
@@ -959,142 +908,93 @@ def main():
 	@jax.jit
 	def rpot_col(new_zs,inda1,indb1,inda2,indb2,dist,zd,k1):
 		dist = jnp.sqrt((inda1-inda2)*(inda1-inda2)+(indb1-indb2)*(indb1-indb2))
-		def close():
+		posi1 = new_zs[inda1,indb1]
+		upper1 = zd+posi1[0]+0.5*posi1[1]
+		lower1 = zd+posi1[0]-0.5*posi1[1]
 		
+		posi2 = new_zs[inda2,indb2]
+		upper2 = zd+posi2[0]+0.5*posi2[1]
+		lower2 = zd+posi2[0]-0.5*posi2[1]
 		
-			posi1 = new_zs[inda1,indb1]
-			upper1 = zd+posi1[0]+0.5*posi1[1]
-			lower1 = zd+posi1[0]-0.5*posi1[1]
-			
-			posi2 = new_zs[inda2,indb2]
-			upper2 = zd+posi2[0]+0.5*posi2[1]
-			lower2 = zd+posi2[0]-0.5*posi2[1]
-			
-			lupper = jnp.min(jnp.array([upper1,upper2]))
-			ulower = jnp.max(jnp.array([lower1,lower2]))	
-			
-			uupper = jnp.max(jnp.array([upper1,upper2]))
-			llower = jnp.min(jnp.array([lower1,lower2]))   
-			
-			poverlap = posi1[0]-posi2[0]
-			up_dist = upper1-upper2
-			lo_dist = lower1-lower2
-			
-			
-			def small():
-				return jnp.linspace(lower1,upper1,30)
-			def nsmall():
-				return jnp.linspace(lower2,upper2,30)
-				
-			test1 = jax.lax.cond(upper1-lower1<upper2-lower2,small,nsmall)
-			test1 = jnp.concatenate((test1,jnp.array([lower1-2,upper1+2])))
-			test1 = jnp.concatenate((test1,jnp.array([lower2-2,upper2+2])))
-			
-			overlap = 0
-			def rloop(overlap,ind):
-				mta = lip_sm(test1[ind],4,lower1,upper1)
-				mtb = lip_sm(test1[ind],4,lower2,upper2)
-				mtbL = jnp.floor(mtb)
-				mtaI = jnp.array(mta,dtype=int)
-				partb = mtb-mtbL
-				mtbU = jnp.ceil(mtb)
-					
-				mtaL = jnp.floor(mta)
-				mtbI = jnp.array(mtb,dtype=int)
-				parta = mta-mtaL
-				mtaU = jnp.ceil(mta)
-				
-				intLL = int_mat[jnp.array(mtaL,dtype=int),jnp.array(mtbL,dtype=int)]
-				intLU = int_mat[jnp.array(mtaL,dtype=int),jnp.array(mtbU,dtype=int)]   
-				intUL = int_mat[jnp.array(mtaU,dtype=int),jnp.array(mtbL,dtype=int)] 
-				intUU = int_mat[jnp.array(mtaU,dtype=int),jnp.array(mtbU,dtype=int)] 
-				
-				intLLS = int_mat[jnp.array(mtbL,dtype=int),jnp.array(mtbL,dtype=int)]
-				intLUS = int_mat[jnp.array(mtbL,dtype=int),jnp.array(mtbU,dtype=int)]   
-				intULS = int_mat[jnp.array(mtbU,dtype=int),jnp.array(mtbL,dtype=int)] 
-				intUUS = int_mat[jnp.array(mtbU,dtype=int),jnp.array(mtbU,dtype=int)]	  
-						
-				intVL = intLL*(1-partb)+partb*intLU
-				
-				intVU = intUL*(1-partb)+partb*intUU
-				
-				intV = intVL*(1-parta)+parta*intVU
-				
-				intVLS = intLLS*(1-partb)+partb*intLUS
-				
-				intVUS = intULS*(1-partb)+partb*intUUS
-				
-				intVS = intVLS*(1-parta)+parta*intVUS
-				
-				overlap += intV
-	
-				return overlap,ind
-			overlap,_ = jax.lax.scan(rloop,overlap,jnp.arange(test1.shape[0]))
-	
-			return overlap,poverlap,up_dist,lo_dist
-		def nclose():
-			return 0.0,0.0,0.0,0.0
-		overlap,poverlap,up_dist,lo_dist = jax.lax.cond(dist<100,close,nclose)
+		poverlap = posi1[0]-posi2[0]
+		up_dist = upper1-upper2
+		lo_dist = lower1-lower2
+		
+		test1 = jnp.where(upper1-lower1<upper2-lower2,jnp.linspace(lower1,upper1,30),jnp.linspace(lower2,upper2,30))
+		test1 = jnp.concatenate((test1,jnp.array([lower1-2,upper1+2])))
+		test1 = jnp.concatenate((test1,jnp.array([lower2-2,upper2+2])))
+		
+		mta = lip_sm(test1,4,lower1,upper1)
+		mtb = lip_sm(test1,4,lower2,upper2)
+		mtbL = jnp.floor(mtb)
+		partb = mtb-mtbL
+		mtbU = jnp.ceil(mtb)
+		mtaL = jnp.floor(mta)
+		parta = mta-mtaL
+		mtaU = jnp.ceil(mta)
+		intLL = int_mat[jnp.array(mtaL,dtype=int),jnp.array(mtbL,dtype=int)]
+		intLU = int_mat[jnp.array(mtaL,dtype=int),jnp.array(mtbU,dtype=int)]
+		intUL = int_mat[jnp.array(mtaU,dtype=int),jnp.array(mtbL,dtype=int)]
+		intUU = int_mat[jnp.array(mtaU,dtype=int),jnp.array(mtbU,dtype=int)]
+		intVL = intLL*(1-partb)+partb*intLU
+		intVU = intUL*(1-partb)+partb*intUU
+		overlap = jnp.sum(intVL*(1-parta)+parta*intVU)
+		
+		#Segments further apart than 100 grid points do not interact
+		close = dist<100
+		overlap = jnp.where(close,overlap,0.0)
+		up_dist = jnp.where(close,up_dist,0.0)
+		lo_dist = jnp.where(close,lo_dist,0.0)
 		flat_d = 10
 		usplit = sj(up_dist-flat_d,1)*jnp.power(up_dist,2)+(1-sj(up_dist+flat_d,1))*jnp.power(up_dist,2)
 		lsplit = sj(lo_dist-flat_d,1)*jnp.power(lo_dist,2)+(1-sj(lo_dist+flat_d,1))*jnp.power(lo_dist,2)
 		return k1*overlap*-lj(dist,1.0)+lsplit+usplit
 	
 	#calculates the full potential due to membrane-membrane interactions
+	#Neighbour table (the 3x3 block around each cell, wrapped at the edges as in get_nbh_inds) built once with numpy
+	def get_nbh_table(nx,ny):
+		table = np.zeros((nx,ny,9,2),dtype=int)
+		for ix in range(nx):
+			for iy in range(ny):
+				for a,dx in enumerate([-1,0,1]):
+					for b,dy in enumerate([-1,0,1]):
+						new_x = ix+dx
+						new_y = iy+dy
+						new_x = new_x-nx if new_x >= nx else new_x
+						new_y = new_y-ny if new_y >= ny else new_y
+						new_x = new_x+nx if new_x < 0 else new_x
+						new_y = new_y+ny if new_y < 0 else new_y
+						table[ix,iy,a*3+b] = [new_x,new_y]
+		return table
+	nbh_table = jnp.array(get_nbh_table(grid_size_x,grid_size_y))
+	cell_x,cell_y = np.meshgrid(np.arange(grid_size_x),np.arange(grid_size_y),indexing="ij")
+	
 	@jax.jit
 	def nbh_calc(new_zs,k,k2,zd):
 		new_zs = get_new_zs(new_zs,loop_inds)
-		grad_grid = jnp.zeros((grid_size_x,grid_size_y,2))
-		def nbh_grad_calc1(grad_grid,ind2):
-			def nbh_grad_calc2(grad_grid,ind3):
-				inder = flat_ind(ind2,ind3,grid_size_x)
-				all_nbhs = jnp.array(get_nbh_inds(inder,grid_size_x,grid_size_y,1),dtype=int)
-				tot = jnp.zeros(2)
-				posi1 = new_zs[ind2,ind3]
-				upper1 = zd+posi1[0]+0.5*posi1[1]
-				lower1 = zd+posi1[0]-0.5*posi1[1]
-				u_mult1 = bgrid_weight(ind2,ind3,upper1)
-				l_mult1 = bgrid_weight(ind2,ind3,lower1)
-				min_mult = (jnp.abs(u_mult1-l_mult1)+u_mult1+l_mult1)/2
-	
-				tot = tot.at[1].set(tot[1]+min_mult*0.5*k2*(mem_data[1]-new_zs[ind2,ind3,1])*(mem_data[1]-new_zs[ind2,ind3,1]))
-				 			
-				def nbh_grad_calc3(tot,ind):
-					inda,indb = unflat_ind(all_nbhs[ind],grid_size_x)
-					def diff(tot):						
-						tot = tot.at[0].set(tot[0]+rpot_col(new_zs,inda,indb,ind2,ind3,0,zd,k))	
-						return tot
-					def ndiff(tot):
-						return tot
-					tot = jax.lax.cond(jnp.logical_and(inda==ind2,indb==ind3),ndiff,diff,tot)
-					return tot,ind
-				tot,_ = jax.lax.scan(nbh_grad_calc3,tot,jnp.arange(all_nbhs.shape[0]))
-				grad_grid = grad_grid.at[ind2,ind3].set(tot)
-				return grad_grid,ind3
-			grad_grid,_ = jax.lax.scan(nbh_grad_calc2,grad_grid,jnp.arange(grid_size_y))
-			return grad_grid,ind2
-		grad_grid,_ = jax.lax.scan(nbh_grad_calc1,grad_grid,jnp.arange(grid_size_x))
-		return grad_grid
+		def cell(ind2,ind3):
+			posi1 = new_zs[ind2,ind3]
+			upper1 = zd+posi1[0]+0.5*posi1[1]
+			lower1 = zd+posi1[0]-0.5*posi1[1]
+			u_mult1 = bgrid_weight(ind2,ind3,upper1)
+			l_mult1 = bgrid_weight(ind2,ind3,lower1)
+			min_mult = (jnp.abs(u_mult1-l_mult1)+u_mult1+l_mult1)/2
+			thick = min_mult*0.5*k2*(mem_data[1]-new_zs[ind2,ind3,1])*(mem_data[1]-new_zs[ind2,ind3,1])
+			nbhs = nbh_table[ind2,ind3]
+			pots = jax.vmap(rpot_col,in_axes=(None,0,0,None,None,None,None,None))(new_zs,nbhs[:,0],nbhs[:,1],ind2,ind3,0,zd,k)
+			not_self = jnp.logical_not(jnp.logical_and(nbhs[:,0]==ind2,nbhs[:,1]==ind3))
+			return jnp.array([jnp.sum(jnp.where(not_self,pots,0.0)),thick])
+		return jax.vmap(jax.vmap(cell))(cell_x,cell_y)
 		
 	
 	#calculates the potential over all membrane segments
 	@jax.jit
 	def calc_graphs(xy,zd):
 		xy = get_new_zs(xy,loop_inds)
-		grid_vals = jnp.zeros((grid_size_x,grid_size_y,2))
-		def calc_grid(grid_vals,ind):
-			ind2 = ind
-			def calc_grid2(grid_vals,ind):
-				ind3 = ind
-				z_disp = xy[ind2,ind3,0]+zd
-				mt = xy[ind2,ind3,1]
-				tot,_ = get_pot(ind2,ind3,xy[ind2,ind3,0],mt,zd)	
-				grid_vals = grid_vals.at[ind2,ind3].set(tot)
-				return grid_vals,ind
-			grid_vals,_ = jax.lax.scan(calc_grid2,grid_vals,jnp.arange(grid_size_y))
-			return grid_vals,ind
-		grid_vals,_ = jax.lax.scan(calc_grid,grid_vals,jnp.arange(grid_size_x))
-		return grid_vals
+		def cell(ind2,ind3):
+			tot,_ = get_pot(ind2,ind3,xy[ind2,ind3,0],xy[ind2,ind3,1],zd)
+			return tot
+		return jax.vmap(jax.vmap(cell))(cell_x,cell_y)
 		
 	#used for evaluating potential over all membrane segments for creating Potential graphs
 	def get_pot_graph(in_xy):
@@ -1116,7 +1016,7 @@ def main():
 		return jnp.sum(calc_graphs(xy,zd))+jnp.sum(nbh_calc(xy,k,k2,zd))
 		
 	#differentiating using jax
-	ac_grad_fun = jax.grad(total_pot_fun,argnums=0)
+	ac_grad_fun = jax.jit(jax.grad(total_pot_fun,argnums=0))
 	
 	
 	#wrapping for use with numpy based minimisation algorithm (As the jax.numpy one had issues at time of writing - this could be updated once this works)
