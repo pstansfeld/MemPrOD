@@ -3,7 +3,7 @@ MemPrOD: Membrane Protein Orientation and Distortions is a program the predicts 
 
 Parameters from the following were used to help write this code:
 
-**Matini forcefield:**
+**Martini forcefield:**
 Siewert J ; Marrink et al. “The MARTINI force field The MARTINI Force Field: Coarse Grained Model for Biomolecular Simulations”. In: (2007). [Paper](https://pubs.acs.org/doi/10.1021/jp071097f)
 
 ## Installation
@@ -21,33 +21,37 @@ The Martini 3 force field bundled with MemPrO is used by default. To use a diffe
 
 ## Outputs
 
-MemPrOD is intended to run on either CG or atomostic PDB files and will output the following data:
+MemPrOD is intended to run on either CG or atomistic PDB files of an oriented protein (e.g. `oriented_rank_1.pdb` from MemPrO). The input must contain the protein only: remove MemPrO's dummy membrane (`DUM`) beads first, for example with `grep -v " DUM " oriented_rank_1.pdb > protein.pdb`.
+
+MemPrOD will output the following data:
 
 * Membrane_Data - A folder that contains additional data, mainly .npz files for building CG systems with distortions using Insane4MemPrO.
   
-    * All_beads.pdb - A pdb files containing all beads used in calculations. Mostly for debugging.
+    * All_beads.pdb - A pdb file containing all beads used in calculations. Mostly for debugging.
       
-    * Surface.pdb - A pdn file showing the surface beads calculated. Again, mostly for debugging
+    * Surface.pdb - A pdb file showing the surface beads calculated. Again, mostly for debugging
       
+* LocData - A folder of .npz files with the upper and lower leaflet heights of each membrane segment (TopData, BotData), masks that are 1 for segments kept and 0 for segments removed because they lie inside the protein (TopBan, BotBan), and the grid coordinates (Xlin, Ylin).
+  
 * AcylTail_contacts.pdb - A pdb file of the original input with b-factors as acyl tail contacts. This is still WIP.
   
 * HeadGroup_contacts.pdb - As above but with b-factors as head group contacts. This is still WIP.
   
-* Deformations.pdb - A pdb file containing a reprensentation of the deformations only.
+* Deformations.pdb - A pdb file containing a representation of the deformations only.
   
-* Deformations_Lower.png - A height map of the deformations in the lower leaflet.
+* Deformations_Lower.svg - A height map of the deformations in the lower leaflet.
   
-* Deformations_Upper.png - As above but for the upper leaflet.
+* Deformations_Upper.svg - As above but for the upper leaflet.
   
-* Charge_Lower.png - A graph of the charge in the lower leaflet, calculated after deformations.
+* Charge_Lower.svg - A graph of the charge in the lower leaflet, calculated after deformations.
   
-* Charge_Upper.png - As above but for the upper leaflet.
+* Charge_Upper.svg - As above but for the upper leaflet.
   
-* Potential_Lower.png - A graph of the potential of each membrane segment in the lower leaflet.
+* Potential_Lower.svg - A graph of the potential of each membrane segment in the lower leaflet.
   
-* Potential_Upper.png - As above but fot the upper leaflet.
+* Potential_Upper.svg - As above but for the upper leaflet.
   
-* Run_command.txt - A text file containg the full run command for later reference.
+* Run_command.txt - A text file containing the full run command for later reference.
 
 ## Flags
 MemPrOD will takes the following flags as input:
@@ -78,7 +82,9 @@ MemPrOD will takes the following flags as input:
 
 -wb, --write_bfactors : Toggles the writing of charge at each membrane segment rather than thinning/thickening.
 
--res, --additional_residues : A comma seperated list of additional residues present in the input file (eg POPE,POPG)
+-bd, --build_system and -bd_args, --build_arguments : Accepted for compatibility with MemPrO but not yet used; MemPrOD does not currently build a CG system. The files in Membrane_Data can be used with Insane4MemPrO.
+
+-res, --additional_residues : A comma separated list of additional residues present in the input file (eg POPE,POPG)
 
 -res_itp, --additional_residues_itp_file : An itp file containing descriptions of each additional residue added.
 
