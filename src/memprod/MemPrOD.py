@@ -12,9 +12,72 @@ import matplotlib.pyplot as plt
 import time
 from mempro import MemPrO as ori
 import argparse
-from scipy.optimize import minimize
+from scipy.optimize import OptimizeResult
+from scipy.optimize._optimize import _line_search_wolfe12, _LineSearchError
 
-	
+
+#BFGS as in scipy.optimize.minimize(method="BFGS") (scipy/optimize/_optimize.py, _minimize_bfgs; BSD licence),
+#with the same line search and stopping rules. The only change is the inverse Hessian update: scipy forms
+#A1 @ H @ A2 with two dense n x n matrix products (O(n^3), ~0.6 s per iteration for MemPrOD's ~3000 variables),
+#whereas the identical update is applied here as a rank-2 correction (O(n^2)):
+#  H+ = H - rho*(H y) s^T - rho*s (y^T H) + (rho^2 y^T H y + rho) s s^T
+def bfgs_minimize(fun,x0,jac,gtol=1e-5,maxiter=None,c1=1e-4,c2=0.9,xrtol=0):
+	x0 = np.asarray(x0,dtype=float).flatten()
+	N = len(x0)
+	if maxiter is None:
+		maxiter = N*200
+	cache = {}
+	def cached(fn,key):
+		def wrapped(x):
+			if key not in cache or not np.array_equal(cache[key][0],x):
+				cache[key] = (np.array(x,copy=True),fn(x))
+			return cache[key][1]
+		return wrapped
+	f = cached(fun,"f")
+	myfprime = cached(jac,"g")
+	old_fval = f(x0)
+	gfk = myfprime(x0)
+	k = 0
+	Hk = np.eye(N)
+	old_old_fval = old_fval+np.linalg.norm(gfk)/2
+	xk = x0
+	warnflag = 0
+	gnorm = np.max(np.abs(gfk))
+	while (gnorm > gtol) and (k < maxiter):
+		pk = -np.dot(Hk,gfk)
+		try:
+			alpha_k,fc,gc,old_fval,old_old_fval,gfkp1 = _line_search_wolfe12(f,myfprime,xk,pk,gfk,old_fval,old_old_fval,amin=1e-100,amax=1e100,c1=c1,c2=c2)
+		except _LineSearchError:
+			warnflag = 2
+			break
+		sk = alpha_k*pk
+		xk = xk+sk
+		if gfkp1 is None:
+			gfkp1 = myfprime(xk)
+		yk = gfkp1-gfk
+		gfk = gfkp1
+		k += 1
+		gnorm = np.max(np.abs(gfk))
+		if gnorm <= gtol:
+			break
+		if alpha_k*np.linalg.norm(pk) <= xrtol*(xrtol+np.linalg.norm(xk)):
+			break
+		if not np.isfinite(old_fval):
+			warnflag = 2
+			break
+		rhok_inv = np.dot(yk,sk)
+		rhok = 1000.0 if rhok_inv == 0. else 1./rhok_inv
+		Hy = np.dot(Hk,yk)
+		yH = np.dot(yk,Hk)
+		cs = (rhok*rhok*np.dot(yk,Hy)+rhok)*sk-rhok*yH
+		Hk += np.dot(np.stack((sk,-rhok*Hy),axis=1),np.stack((cs,sk)))
+	if warnflag != 2 and k >= maxiter:
+		warnflag = 1
+	elif warnflag != 2 and (np.isnan(gnorm) or np.isnan(old_fval) or np.isnan(xk).any()):
+		warnflag = 3
+	return OptimizeResult(fun=old_fval,jac=gfk,hess_inv=Hk,status=warnflag,success=(warnflag == 0),x=xk,nit=k)
+
+
 def main():
 	warnings.filterwarnings('ignore')
 	os.environ["TF_CPP_MIN_LOG_LEVEL"]="3"
@@ -1050,7 +1113,7 @@ def main():
 	#main minimisation loop
 	try_again=True
 	while try_again:
-		min_out = minimize(nwrap_tpot, np.concatenate((np.array(new_zs.flatten()),np.array([start_z]))),jac = nwrap_grad ,method='BFGS', tol=2e-4,options={"gtol":0.002,"maxiter":iters})
+		min_out = bfgs_minimize(nwrap_tpot, np.concatenate((np.array(new_zs.flatten()),np.array([start_z]))),jac = nwrap_grad,gtol=0.002,maxiter=iters)
 		new_zs = min_out.x[:grid_size_x*grid_size_y*2]
 		start_z = min_out.x[-1]
 		new_zs = new_zs.reshape((grid_size_x,grid_size_y,2))
