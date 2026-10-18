@@ -389,13 +389,8 @@ def main():
 	def get_int_strength(bead_1,bead_2,martini_file):
 		if(bead_2 == "GHOST"):
 			return 0
-		string = " "*(6-len(bead_1))+bead_1+" "*(6-len(bead_2))+bead_2
-		string2 = " "*(6-len(bead_2))+bead_2+" "*(6-len(bead_1))+bead_1
-		mfile = open(martini_file,"r")
-		content = mfile.readlines()
-		for i,line in enumerate(content):
-			if(string in line or string2 in line):
-				return -float(line[32:45])
+		#Same lookup as MemPrO's, which reads the ~16 MB force field once instead of once per bead pair
+		return ori.get_int_strength(bead_1,bead_2,martini_file)
 		
 	#Gets the interations between protein beads and the enviroment. This is used to create the mean fields		
 	def get_mem_def(martini_file):
