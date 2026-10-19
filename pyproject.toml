@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memprod"
-version = "0.1.0"
+version = "0.1.1"
 authors = [{name = "Matyas Parrag",email="matyas.parrag@gmail.com"}]
 description = "A program for the prediction of local membrane deformations around a protein"
 readme = "README.md"
