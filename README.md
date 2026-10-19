@@ -60,11 +60,11 @@ MemPrOD will output the following data:
 * Run_command.txt - A text file containing the full run command for later reference.
 
 ## Flags
-MemPrOD will takes the following flags as input:
+MemPrOD takes the following flags as input:
 
 -h, --help : This will display a help message with all possible flags and some information on their use.
 
--f, --file_name : This is the name of the input file for the protein that you wish to predict deformations for. It must be a .pdb. In future support for .gro files may be added. The protein can be either atomistic or coarse grained. The code should detect which it is and ignore unknown atom/bead types, however in the case of an error please let me know and send me the file which caused it. It is recommended that the PDB files had no missing atoms as this can cause the predictions to be of lower quality.
+-f, --file_name : (Required) This is the name of the input file for the protein that you wish to predict deformations for. It must be a .pdb. In future support for .gro files may be added. The protein can be either atomistic or coarse grained. The code should detect which it is and ignore unknown atom/bead types, however in the case of an error please let me know and send me the file which caused it. It is recommended that the PDB files had no missing atoms as this can cause the predictions to be of lower quality.
 
 -o, --output : This is the name of the ouput directory. The code will default to a folder called Deformations in the directory where the code is run.
 
@@ -82,7 +82,7 @@ MemPrOD will takes the following flags as input:
 
 -k2, --k2_const : This scales the potential associated with compression and extension of the membrane. This is not generally required and should not be change unless you know what you're doing. (Default: 0)
 
--zshift, --zshift : This changes the starting Z position of the protein.
+-zshift, --zshift : This changes the starting Z position of the protein. (Default: 0)
 
 -mt, --membrane_thickness : This indicates what the undeformed membrane thickness should be in angstroms. (Default: 38)
 
@@ -98,11 +98,11 @@ MemPrOD will takes the following flags as input:
 
 ## An example
 
-MemPrOD is a very simply code to use, here we will go through a quick example. The first step will be to download an exmaple integral membrane protein, let us choose 4BWZ from the protein data bank. We will be downloading this from MemProtMD rather than the protein data bank. Go to [this page](https://memprotmd.bioch.ox.ac.uk/_ref/PDB/4bwz/_sim/4bwz_default_dppc/) and download "4bwz_default_dppc-head-contacts.pdb" rename this to "4bwz.pdb". Create a folder called "MemPrOD_Example" and place "4bwz.pdb" in this folder. **NOTE: If installing with pip than "MemPrO" and "MemPrOD" can be used to run the code instead of the full path as shown in the example and tutorials below.**
+MemPrOD is a very simply code to use, here we will go through a quick example. The first step will be to download an exmaple integral membrane protein, let us choose 4BWZ from the protein data bank. We will be downloading this from MemProtMD rather than the protein data bank. Go to [this page](https://memprotmd.bioch.ox.ac.uk/_ref/PDB/4bwz/_sim/4bwz_default_dppc/) and download "4bwz_default_dppc-head-contacts.pdb" rename this to "4bwz.pdb". Create a folder called "MemPrOD_Example" and place "4bwz.pdb" in this folder. **NOTE: If installing with pip then `mempro` and `MemPrOD` can be used to run the code instead of the full path as shown in the example and tutorials below. In a clone of the repositories the scripts are `mempro/MemPrO.py` (MemPrO) and `src/memprod/MemPrOD.py` (MemPrOD).**
 
 Before we can predict deforamtions we will first need to orient the protein. If you are unfiamilar with MemPrO then take a look at the [MemPrO tutorials](https://github.com/ShufflerBardOnTheEdge/MemPrO/blob/main/MemPrO_tutorials.md). We can orient by running the following command in "MemPrOD_Example".
 
->python PATH/TO/MemPrO_Script.py -f 4bwz.pdb
+>python PATH/TO/MemPrO.py -f 4bwz.pdb
 
 This will create a folder called "Orient". To get the oriented protein run the following:
 
@@ -112,9 +112,9 @@ This will create a file called "4bwz-oriented.pdb". We can now run the following
 
 >python PATH/TO/MemPrOD.py -f 4bwz-oriented.pdb
 
-This will take a few minutes to run and will create a folder called "Deformations". In this folder we can find "Deformations.pdb" Load "4bwz_oriented.pdb" and "Deformations.pdb" in PyMOL. We can improve the clarity of the deformations by running the following command in PyMOL:
+This should take under a minute on a typical CPU and will create a folder called "Deformations". In this folder we can find "Deformations.pdb" Load "4bwz-oriented.pdb" and "Deformations.pdb" in PyMOL. We can improve the clarity of the deformations by running the following command in PyMOL:
 
->spectrum b, red_white_blue,Deformations,miniumum=-10,maximum=10
+>spectrum b, red_white_blue,Deformations,minimum=-10,maximum=10
 
 We can compare this to the deformations shown on MemProtMD, and we see good agreement in general, with MemPrOD over prediciting thinning on the lower leaflet slightly.
 
