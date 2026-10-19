@@ -23,5 +23,5 @@ gpu = ["mempro[gpu] >= 0.2.1"]
 MemPrOD = "memprod:MemPrOD.main"
 
 [project.urls]
-Homepage = "https://github.com/ShufflerBardOnTheEdge/MemPrOD"
-Issues = "https://github.com/ShufflerBardOnTheEdge/MemPrOD/issues"
+Homepage = "https://github.com/pstansfeld/MemPrOD"
+Issues = "https://github.com/pstansfeld/MemPrOD/issues"

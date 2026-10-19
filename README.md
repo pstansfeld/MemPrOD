@@ -100,7 +100,7 @@ MemPrOD takes the following flags as input:
 
 MemPrOD is a very simply code to use, here we will go through a quick example. The first step will be to download an exmaple integral membrane protein, let us choose 4BWZ from the protein data bank. We will be downloading this from MemProtMD rather than the protein data bank. Go to [this page](https://memprotmd.bioch.ox.ac.uk/_ref/PDB/4bwz/_sim/4bwz_default_dppc/) and download "4bwz_default_dppc-head-contacts.pdb" rename this to "4bwz.pdb". Create a folder called "MemPrOD_Example" and place "4bwz.pdb" in this folder. **NOTE: If installing with pip then `mempro` and `MemPrOD` can be used to run the code instead of the full path as shown in the example and tutorials below. In a clone of the repositories the scripts are `mempro/MemPrO.py` (MemPrO) and `src/memprod/MemPrOD.py` (MemPrOD).**
 
-Before we can predict deforamtions we will first need to orient the protein. If you are unfiamilar with MemPrO then take a look at the [MemPrO tutorials](https://github.com/ShufflerBardOnTheEdge/MemPrO/blob/main/MemPrO_tutorials.md). We can orient by running the following command in "MemPrOD_Example".
+Before we can predict deforamtions we will first need to orient the protein. If you are unfiamilar with MemPrO then take a look at the [MemPrO tutorials](https://github.com/pstansfeld/MemPrO/blob/main/MemPrO_tutorials.md). We can orient by running the following command in "MemPrOD_Example".
 
 >python PATH/TO/MemPrO.py -f 4bwz.pdb
 

@@ -102,23 +102,23 @@ def main():
 	parser.set_defaults(build_system=False)
 	parser.add_argument("-bd_args","--build_arguments",help="Arguments to pass to insane when building system")
 	parser.set_defaults(build_arguments="")
-	parser.add_argument("-cut","--cutoff",help="Cutoff for LJ interactions (Deafult: 12)")
+	parser.add_argument("-cut","--cutoff",help="Cutoff for LJ interactions (Default: 12)")
 	parser.set_defaults(cutoff=12)
-	parser.add_argument("-k1","--k1_const",help="Spring constant for neighbouring grid point Z deviations (Deafult: 0.25)")
+	parser.add_argument("-k1","--k1_const",help="Spring constant for neighbouring grid point Z deviations (Default: 0.25)")
 	parser.set_defaults(k1_const=0.25)
-	parser.add_argument("-k2","--k2_const",help="Spring constant for membrane compression (Deafult: 0)")
+	parser.add_argument("-k2","--k2_const",help="Spring constant for membrane compression (Default: 0)")
 	parser.set_defaults(k2_const=0)
-	parser.add_argument("-zshift","--zshift",help="Z shift of membrane for proteins that are missoriented due to lack of deformations.")
+	parser.add_argument("-zshift","--zshift",help="Z shift of membrane for proteins that are misoriented due to lack of deformations.")
 	parser.set_defaults(zshift=0)
-	parser.add_argument("-mt","--membrane_thickness",help="Initial thickness of membrane in Angstroms (Deafult: 38)")
+	parser.add_argument("-mt","--membrane_thickness",help="Initial thickness of membrane in Angstroms (Default: 38)")
 	parser.set_defaults(membrane_thickness=38.0)
 	parser.add_argument("-wb","--write_bfactors",action="store_true",help="Toggle writing charge at each membrane segment instead of z position.")
 	parser.set_defaults(write_bfactors=False)
-	parser.add_argument("-res","--additional_residues",help="Comma seperate list of additional residues in input files (eg: POPG) Note the only ATOM entries will be read, all HETATM entries will be ignored.")
+	parser.add_argument("-res","--additional_residues",help="Comma separated list of additional residues in input files (eg: POPG) Note that only ATOM entries will be read, all HETATM entries will be ignored.")
 	parser.set_defaults(additional_residues="")
-	parser.add_argument("-res_itp","--additional_residues_itp_file",help="Path to the itp file describing all additional residues, and bead types associated to beads in the residue. A CG representation is required, for atomisitic inputs an additional file is required which describes the beading.")
+	parser.add_argument("-res_itp","--additional_residues_itp_file",help="Path to the itp file describing all additional residues, and bead types associated to beads in the residue. A CG representation is required, for atomistic inputs an additional file is required which describes the beading.")
 	parser.set_defaults(additional_residues_itp_file="")
-	parser.add_argument("-res_cg","--residue_cg_file",help="Folder that contains a files of name RES.pdb describing the beading for each additional RES - see CG2AT github for examples")
+	parser.add_argument("-res_cg","--residue_cg_file",help="Folder that contains files named RES.pdb describing the beading for each additional RES - see CG2AT github for examples")
 	parser.set_defaults(residue_cg_file="")
 	args = parser.parse_args()
 	
@@ -131,7 +131,7 @@ def main():
 				print("ERROR: Additional residue itp is required if using additional residues.")
 				exit()
 			if args.residue_cg_file == "":
-				print("WARNING: You have not added beading information for the added residues, this will cause an error if orienting a atomisitic input.")
+				print("WARNING: You have not added beading information for the added residues, this will cause an error if using an atomistic input.")
 				
 	if(len(add_reses) > 0):
 		if(len(add_reses[0]) > 0):
@@ -1097,10 +1097,10 @@ def main():
 	print("Z change:",np.format_float_positional(start_z/5.0,precision=3))
 	plt.imshow((new_zs[:,:,0]+0.5*new_zs[:,:,1])*TopBan)
 	plt.savefig(orient_dir+"Deformations_Upper.svg")
-	plt.clf
+	plt.clf()
 	plt.imshow((new_zs[:,:,0]-0.5*new_zs[:,:,1])*BotBan)
 	plt.savefig(orient_dir+"Deformations_Lower.svg")
-	plt.clf
+	plt.clf()
 	
 	
 	
@@ -1110,10 +1110,10 @@ def main():
 	
 	plt.imshow(gc[:,:,0]*BotBan)
 	plt.savefig(orient_dir+"Charge_Lower.svg")
-	plt.clf
+	plt.clf()
 	plt.imshow(gc[:,:,1]*TopBan)
 	plt.savefig(orient_dir+"Charge_Upper.svg")
-	plt.clf
+	plt.clf()
 	
 	
 	run_txt = open(orient_dir+"Run_command.txt","w")
