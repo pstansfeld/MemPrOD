@@ -88,6 +88,8 @@ MemPrOD takes the following flags as input:
 
 -wb, --write_bfactors : Toggles the writing of charge at each membrane segment rather than thinning/thickening.
 
+-enc, --enclosed : How to treat regions the protein encloses in the membrane, where a lipid fits but cannot be reached from outside the protein (the inside of a ring or barrel). auto predicts membrane in a region where the narrowest slice of the hydrophobic core has at least 1 nm<sup>2</sup> free and at least 60% of the residues lining it are hydrophobic (ALA, VAL, LEU, ILE, MET, PHE, TRP, CYS, PRO), the same rule as Insane4MemPrO -enclosed auto, so a lipid-filled ring such as a c-ring is predicted while a water-filled pore is not. lipids predicts membrane in every enclosed region, and empty treats them as protein (the behaviour before this option). Each region found is printed with its free area, lining and the decision. (Default: auto)
+
 -bd, --build_system and -bd_args, --build_arguments : Accepted for compatibility with MemPrO but not yet used; MemPrOD does not currently build a CG system. The files in Membrane_Data can be used with Insane4MemPrO.
 
 -res, --additional_residues : A comma separated list of additional residues present in the input file (eg POPE,POPG)

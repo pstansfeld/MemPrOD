@@ -114,6 +114,8 @@ def main():
 	parser.set_defaults(membrane_thickness=38.0)
 	parser.add_argument("-wb","--write_bfactors",action="store_true",help="Toggle writing charge at each membrane segment instead of z position.")
 	parser.set_defaults(write_bfactors=False)
+	parser.add_argument("-enc","--enclosed",help="Membrane in regions the protein encloses (the inside of a ring or barrel): auto (where the narrowest core slice has at least 1 nm^2 free and at least 60%% of the lining residues are hydrophobic, as Insane4MemPrO -enclosed auto), lipids or empty (Default: auto)")
+	parser.set_defaults(enclosed="auto")
 	parser.add_argument("-res","--additional_residues",help="Comma separated list of additional residues in input files (eg: POPG) Note that only ATOM entries will be read, all HETATM entries will be ignored.")
 	parser.set_defaults(additional_residues="")
 	parser.add_argument("-res_itp","--additional_residues_itp_file",help="Path to the itp file describing all additional residues, and bead types associated to beads in the residue. A CG representation is required, for atomistic inputs an additional file is required which describes the beading.")
@@ -152,6 +154,10 @@ def main():
 		
 	
 		
+	if(args.enclosed not in ["auto","lipids","empty"]):
+		print("ERROR: Could not read value of -enc. Must be auto, lipids or empty.")
+		exit()
+	
 	try:
 		iters = int(args.iters)
 	except:
@@ -629,6 +635,10 @@ def main():
 	surf_bvals = surf_bvals[indexer]
 	bead_types = bead_types[indexer]
 	
+	if(surf_poses.shape[0] == 0):
+		print("ERROR: No protein surface within 50 A of the membrane midplane (z = 0). The input must be oriented in the membrane, for example a MemPrO output structure.")
+		exit()
+	
 	indexer2 = np.nonzero((np.array(poses[:,2]) < 50)*(np.array(poses[:,2] > -50)))
 	
 	all_poses = poses.copy()
@@ -791,11 +801,88 @@ def main():
 		rdic_carry,_ = jax.lax.scan(remove_disc,rdic_carry,-transp_arange+(numer-1))
 		return rdic_carry[:,2].reshape(grid_size_y,grid_size_x).T
 	
+	#Side-chain atoms (or beads) of the input with their residue names and residue numbers, in the grid frame
+	def side_chains():
+		backbone = ["N","CA","C","O","OXT","BB"]
+		xyz,names,res = [],[],[]
+		prev_key = None
+		nres = -1
+		for c in open(fn):
+			if(c.startswith("ATOM") and len(c) > 54):
+				key = (c[17:21].strip(),c[21],c[22:27])
+				if(key != prev_key):
+					nres += 1
+					prev_key = key
+				if(c[12:16].strip() in backbone or c[76:78].strip() == "H" or c[12:16].strip().startswith("H")):
+					continue
+				xyz.append([float(c[30:38]),float(c[38:46]),float(c[46:54])])
+				names.append(key[0])
+				res.append(nres)
+		xyz = np.dot(np.array(rot_mat),np.array(xyz).T).T if len(xyz) > 0 else np.zeros((0,3))
+		return xyz,np.array(names),np.array(res,dtype=int)
+	
+	def fill_enclosed(bgrid,bgrid_o,acc):
+		from scipy import ndimage
+		from scipy.spatial import cKDTree
+		hydrophobic = ["ALA","VAL","LEU","ILE","MET","PHE","TRP","CYS","PRO"]
+		zshift = float(args.zshift)
+		zs = -vext+(np.arange(vert_grid_size)+0.5)*(2*vext/vert_grid_size)
+		core = np.nonzero(np.abs(zs-zshift) < mem_data[1]/2.0)[0]
+		#Slices from the midplane out to the head groups, where enclosed regions that qualify are filled
+		mem_slices = np.nonzero(np.abs(zs-zshift) < mem_data[1]/2.0+10)[0]
+		enclosed = (acc > 0.5)*(bgrid_o < 0.5)
+		regions,nregions = ndimage.label(np.any(enclosed[:,:,core],axis=2))
+		if(nregions == 0):
+			return jnp.array(bgrid),jnp.array(bgrid_o)
+		sc_xyz,sc_names,sc_res = side_chains()
+		gx,gy = np.meshgrid(np.array(xs),np.array(ys),indexing="ij")
+		pix_area = grid_den*grid_den/100.0
+		near = 6.0
+		print("Membrane in regions the protein encloses (-enc "+args.enclosed+"):")
+		for reg in range(1,nregions+1):
+			mask = regions == reg
+			free = np.array([np.sum(acc[:,:,k][mask] > 0.5) for k in core])
+			narrowest = np.min(free)*pix_area
+			lining = set()
+			for k in core:
+				pix = mask*(acc[:,:,k] > 0.5)
+				if(not np.any(pix)):
+					continue
+				in_slice = np.abs(sc_xyz[:,2]-zs[k]) < vext/vert_grid_size
+				if(not np.any(in_slice)):
+					continue
+				d,_ = cKDTree(np.stack((gx[pix],gy[pix]),axis=1)).query(sc_xyz[in_slice,:2])
+				lining.update(sc_res[in_slice][d < near].tolist())
+			lining = sorted(lining)
+			n_hyd = sum([sc_names[sc_res == r][0] in hydrophobic for r in lining])
+			frac = n_hyd/len(lining) if len(lining) > 0 else 0.0
+			centre = np.dot(np.array(rot_mat_inv),np.array([gx[mask].mean(),gy[mask].mean(),0]))
+			fill = args.enclosed == "lipids" or (narrowest >= 1.0 and frac >= 0.6)
+			print("  Region at ("+str(np.round(centre[0]/10,1))+", "+str(np.round(centre[1]/10,1))+") nm: narrowest core slice "+str(np.round(narrowest,1))+" nm^2 free, "+str(len(lining))+" lining residues, "+str(int(round(100*frac)))+"% hydrophobic: "+("membrane" if fill else "left empty"))
+			if(not fill):
+				continue
+			for k in mem_slices:
+				pix = mask*enclosed[:,:,k]
+				if(not np.any(pix)):
+					continue
+				#As the flood fill marks the cells it reaches and their neighbours
+				reach = ndimage.binary_dilation(pix,structure=np.ones((3,3)))
+				bgrid_o[:,:,k] = np.maximum(bgrid_o[:,:,k],reach)
+				bgrid[:,:,k] = np.maximum(bgrid[:,:,k],ndimage.binary_dilation(reach,structure=np.ones((3,3))))
+		return jnp.array(bgrid),jnp.array(bgrid_o)
+	
 	#Each height slice is filled independently, so all slices are processed together
 	def fill_out_slice(bslice):
-		tempb = fill_mid(1-accessable(bslice),0.5)
-		return fill_mid(1-tempb,0.5),tempb
-	bgrid,bgrid_o = jax.vmap(fill_out_slice,in_axes=2,out_axes=2)(bgrid)
+		acc = accessable(bslice)
+		tempb = fill_mid(1-acc,0.5)
+		return fill_mid(1-tempb,0.5),tempb,acc
+	bgrid,bgrid_o,bgrid_acc = jax.vmap(fill_out_slice,in_axes=2,out_axes=2)(bgrid)
+	
+	#Regions the protein encloses (room for lipids that cannot be reached from outside the protein) are treated as
+	#protein above. With -enc auto they are membrane where the narrowest slice of the hydrophobic core has at least
+	#1 nm^2 free and at least 60% of the residues lining it are hydrophobic, the rule of Insane4MemPrO -enclosed auto.
+	if(args.enclosed != "empty"):
+		bgrid,bgrid_o = fill_enclosed(np.array(bgrid),np.array(bgrid_o),np.array(bgrid_acc))
 	
 	print("Done in:", str(np.format_float_positional(time.time()-timer,precision=3))+"s")
 	timer = time.time()
