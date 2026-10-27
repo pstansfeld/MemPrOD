@@ -68,7 +68,7 @@ MemPrOD takes the following flags as input:
 
 -o, --output : This is the name of the ouput directory. The code will default to a folder called Deformations in the directory where the code is run.
 
--ni, --iters : Number of minimisation iterations. (Default: 75)
+-ni, --iters : Number of minimisation iterations. (Default: 300)
 
 -ng, --grid_density : The spacing between membrane segments. It is highly recommended to use values above 2 as low values can quickly become very expensive. (Default: 3)
 
