@@ -108,6 +108,8 @@ def main():
 	parser.set_defaults(k1_const=0.25)
 	parser.add_argument("-k2","--k2_const",help="Spring constant for membrane compression (Default: 0)")
 	parser.set_defaults(k2_const=0)
+	parser.add_argument("-sm","--smooth",help="Width (Angstrom, Gaussian sigma) the upper and lower membrane surfaces are smoothed over after minimisation, each averaged over its own membrane cells, removing steps between neighbouring cells; 0 for none (Default: 5)")
+	parser.set_defaults(smooth=5)
 	parser.add_argument("-zshift","--zshift",help="Z shift of membrane for proteins that are misoriented due to lack of deformations.")
 	parser.set_defaults(zshift=0)
 	parser.add_argument("-mt","--membrane_thickness",help="Initial thickness of membrane in Angstroms (Default: 38)")
@@ -153,6 +155,15 @@ def main():
 		exit()
 		
 	
+		
+	try:
+		smooth = float(args.smooth)
+	except:
+		print("ERROR: Could not read value of -sm. Must be a float >= 0.")
+		exit()
+	if(smooth < 0):
+		print("ERROR: Could not read value of -sm. Must be a float >= 0.")
+		exit()
 		
 	if(args.enclosed not in ["auto","lipids","empty"]):
 		print("ERROR: Could not read value of -enc. Must be auto, lipids or empty.")
@@ -514,6 +525,22 @@ def main():
 		np.savez(locdir+"BotData.npz",Data[:,:,0])
 		np.savez(locdir+"TopData.npz",Data[:,:,1])
 		return BanGrid[:,:,0],BanGrid[:,:,1]
+		
+	#Gaussian smoothing of the upper (z+t/2) and lower (z-t/2) surfaces of new_zs (midplane z, thickness t), each over
+	#the cells where its leaflet has membrane (normalised convolution), so the protein does not drag the edge down
+	def smooth_surfaces(new_zs,top_ban,bot_ban,sigx,sigy):
+		from scipy import ndimage
+		new_zs = np.array(new_zs)
+		surfs = []
+		for sgn,ban in ((1,top_ban),(-1,bot_ban)):
+			surf = new_zs[:,:,0]+sgn*0.5*new_zs[:,:,1]
+			w = (np.array(ban) > 0.5).astype(float)
+			num = ndimage.gaussian_filter(surf*w,(sigx,sigy),mode="nearest")
+			den = ndimage.gaussian_filter(w,(sigx,sigy),mode="nearest")
+			surfs.append(np.where(den > 1e-3,num/np.maximum(den,1e-3),surf))
+		new_zs[:,:,0] = 0.5*(surfs[0]+surfs[1])
+		new_zs[:,:,1] = surfs[0]-surfs[1]
+		return new_zs
 		
 	#calcualtes the eleectrostatic force using below
 	#All lower/upper head positions of all grid cells are evaluated together; cells outside the membrane stay 0
@@ -1152,6 +1179,11 @@ def main():
 	#calcuating graphs, contacts and general post processing
 	print("Post processing...")
 	timer = time.time()
+	
+	#Smoothing the upper and lower surfaces, each averaged over the cells where that leaflet has membrane
+	if(smooth > 0):
+		BotBan, TopBan = write_pdb(start_z,new_zs,grid_ban,grid_size_x,grid_size_y,x_ext,y_ext,None,orient_dir,locdir,memdir,False,mem_data,rot_mat_inv)
+		new_zs = smooth_surfaces(new_zs,TopBan,BotBan,smooth/(2*x_ext/(grid_size_x-1)),smooth/(2*y_ext/(grid_size_y-1)))
 	
 	np.savez(memdir+"Membrane_pos.npz",new_zs)
 	np.savez(memdir+"Z_change.npz",start_z/5.0)

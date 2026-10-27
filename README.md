@@ -82,6 +82,8 @@ MemPrOD takes the following flags as input:
 
 -k2, --k2_const : This scales the potential associated with compression and extension of the membrane. This is not generally required and should not be change unless you know what you're doing. (Default: 0)
 
+-sm, --smooth : Width (Angstrom, Gaussian sigma) the upper and lower membrane surfaces are smoothed over after minimisation. Each surface is averaged only over the cells where its leaflet has membrane, so the protein does not pull the edge down. This removes steps between neighbouring membrane segments without changing the overall deformation; 0 turns it off. (Default: 5)
+
 -zshift, --zshift : This changes the starting Z position of the protein. (Default: 0)
 
 -mt, --membrane_thickness : This indicates what the undeformed membrane thickness should be in angstroms. (Default: 38)
