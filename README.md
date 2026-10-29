@@ -15,7 +15,7 @@ To install MemPrOD run the following:
 This will install MemPrO, Insane4MemPrO and MemPrOD. For NVIDIA GPU support in the MemPrO parts (Linux, CUDA 12), use:
 >pip install "memprod[gpu]"
 
-Otherwise, clone the GitHub repository and install it with `pip install .` from the repository folder. Python 3.11 or later is required; this installs MemPrO 0.2.1 or later, JAX (0.6.0–0.11) and SciPy.
+Otherwise, clone the GitHub repository and install it with `pip install .` from the repository folder. Python 3.11 or later is required; this installs MemPrO 0.2.1 or later, JAX (0.6.0–0.12) and SciPy.
 
 The Martini 3 force field bundled with MemPrO is used by default. To use a different one, supply it with `-itp`, or set the following environment variable (for Linux users):
 
