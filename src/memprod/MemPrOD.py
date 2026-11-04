@@ -21,6 +21,12 @@ from scipy.optimize._optimize import _line_search_wolfe12, _LineSearchError
 #A1 @ H @ A2 with two dense n x n matrix products (O(n^3), ~0.6 s per iteration for MemPrOD's ~3000 variables),
 #whereas the identical update is applied here as a rank-2 correction (O(n^2)):
 #  H+ = H - rho*(H y) s^T - rho*s (y^T H) + (rho^2 y^T H y + rho) s s^T
+#One PDB ATOM record in the fixed columns of the format: serial 7-11, name 13-16, residue 18-20, chain 22, residue
+#number 23-26, x/y/z 31-54, occupancy 55-60, B-factor 61-66
+def pdb_atom_line(serial,name,resname,chain,resnum,x,y,z,occ=1.0,bfac=0.0):
+	name = name if len(name) == 4 else " "+name
+	return "ATOM  %5d %-4s %3s %1s%4d    %8.3f%8.3f%8.3f%6.2f%6.2f\n"%(serial%100000,name[:4],resname[:3],chain[:1],resnum%10000,x,y,z,occ,bfac)
+
 def bfgs_minimize(fun,x0,jac,gtol=1e-5,maxiter=None,c1=1e-4,c2=0.9,xrtol=0):
 	x0 = np.asarray(x0,dtype=float).flatten()
 	N = len(x0)
@@ -258,16 +264,7 @@ def main():
 		count = 0
 		for i in points:
 			count += 1
-			count_str = (6-len(str(count)))*" "+str(count)
-			c = "ATOM "+count_str+" BB   DUM	 1	   0.000   0.000  15.000  1.00  0.00" 
-			xp = np.format_float_positional(i[0],precision=3)
-			yp = np.format_float_positional(i[1],precision=3)
-			zp = np.format_float_positional(i[2],precision=3)
-			xp += "0"*(3-len((xp.split(".")[1])))
-			yp += "0"*(3-len((yp.split(".")[1])))
-			zp += "0"*(3-len((zp.split(".")[1])))
-			new_c = c[:30]+(" "*(8-len(xp)))+xp+(" "*(8-len(yp)))+yp+(" "*(8-len(zp))) +zp+c[54:]+"\n"	
-			new_file.write(new_c)
+			new_file.write(pdb_atom_line(count,"BB","DUM","Z",1,float(i[0]),float(i[1]),float(i[2])))
 		new_file.close()
 	
 	def write_protein(bfacs,fn,ofn):
@@ -278,9 +275,9 @@ def main():
 		bc = 0
 		for c in n_lines:
 			if len(c) > 54 and "[" not in c and c.startswith("ATOM"):			
-				bbp = np.format_float_positional(bfacs[map_to_beads[bc]],precision=3)
-				bbp += "0"*(3-len((bbp.split(".")[1])))
-				new_c = c[:60]+(" "*(8-len(bbp)))+bbp+c[68:]
+				#The record as read up to the occupancy, then the B-factor in its six columns (61-66); what follows in
+				#the input is dropped, as files with a wider B-factor (MemPrO 0.3.3 and earlier) leave it misaligned
+				new_c = c.rstrip("\n")[:60].ljust(60)+"%6.2f"%float(bfacs[map_to_beads[bc]])+"\n"
 				bc+=1
 				out_file.write(new_c)
 			else:
@@ -500,25 +497,11 @@ def main():
 						if(covp > 0.6):
 							BanGrid[i,j,nn] = 1
 							Data[i,j,nn] = grid_in[i,j,0]+zp
-							if(bfacs):
-								bbp = np.format_float_positional(gc[i,j,nn],precision=3)
-							else:
-								bbp = np.format_float_positional((grid_in[i,j,0]+zp-z_dev)*pm1,precision=3)						
-							bbp += "0"*(3-len((bbp.split(".")[1])))
+							#B-factor: charge with -wb, otherwise the surface's deviation from flat
+							bbp = float(gc[i,j,nn]) if bfacs else float((grid_in[i,j,0]+zp-z_dev)*pm1)
 							count += 1
-							count_str = (6-len(str(count)))*" "+str(count)
-							c = "ATOM "+count_str+" BB   DUM Z   1	   0.000   0.000  15.000  1.00  0.00" 
-													
-							pos = np.array([xs[i],ys[j],0])
-							pos = np.dot(rot_mat_inv,pos)
-							xp = np.format_float_positional(pos[0],precision=3)
-							yp = np.format_float_positional(pos[1],precision=3)
-							zp = np.format_float_positional(grid_in[i,j,0]+zp,precision=3)
-							xp += "0"*(3-len((xp.split(".")[1])))
-							yp += "0"*(3-len((yp.split(".")[1])))
-							zp += "0"*(3-len((zp.split(".")[1])))
-							new_c = c[:30]+(" "*(8-len(xp)))+xp+(" "*(8-len(yp)))+yp+(" "*(8-len(zp))) +zp+c[54:60]+(" "*(8-len(bbp)))+bbp+c[66:]+"\n"	
-							new_file.write(new_c)
+							pos = np.dot(rot_mat_inv,np.array([xs[i],ys[j],0]))
+							new_file.write(pdb_atom_line(count,"BB","DUM","Z",1,float(pos[0]),float(pos[1]),float(grid_in[i,j,0]+zp),1.0,bbp))
 		new_file.close()
 		np.savez(locdir+"BotBan.npz",BanGrid[:,:,0])
 		np.savez(locdir+"TopBan.npz",BanGrid[:,:,1])
