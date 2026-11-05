@@ -56,11 +56,18 @@ def dual_membrane_runs(args,orient_dir):
 		sub_dir = orient_dir+name+"/"
 		if(not os.path.exists(sub_dir)):
 			os.mkdir(sub_dir)
+		#Whole residues, kept by their backbone (CA, or BB for CG): MemPrO's atomistic-to-CG mapping needs every atom of a
+		#residue, so cutting atoms by their own z at the window's edges would leave broken residues
+		residue = lambda l: (l[21],l[22:27],l[17:20])
+		backbone = {}
+		for l in lines:
+			if l[12:16].strip() in ("CA","BB") and residue(l) not in backbone:
+				backbone[residue(l)] = float(l[46:54])
 		part = []
 		for l in lines:
-			z = float(l[46:54])
+			z = backbone.get(residue(l),float(l[46:54]))
 			if abs(z-centre) < thick/2+DM_MARGIN:
-				part.append(l[:46]+"%8.3f"%(z-centre)+l[54:])
+				part.append(l[:46]+"%8.3f"%(float(l[46:54])-centre)+l[54:])
 		if(len(part) == 0):
 			print("ERROR: No protein within "+str(thick/2+DM_MARGIN)+" A of the membrane at z = "+str(centre)+" A")
 			exit()
