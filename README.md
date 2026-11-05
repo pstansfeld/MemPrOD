@@ -59,6 +59,8 @@ MemPrOD will output the following data:
   
 * Run_command.txt - A text file containing the full run command for later reference.
 
+With `-dm` (two membranes) the output folder holds `Inner/` (the membrane at -z) and `Outer/` (the membrane at +z), each with all of the above for that membrane, its part of the protein (`protein_part.pdb`) and `Membrane_Data/Membrane_centre.npz`, and a `Deformations.pdb` with both membranes' surfaces in the input's frame.
+
 ## Flags
 MemPrOD takes the following flags as input:
 
@@ -87,6 +89,12 @@ MemPrOD takes the following flags as input:
 -zshift, --zshift : This changes the starting Z position of the protein. (Default: 0)
 
 -mt, --membrane_thickness : This indicates what the undeformed membrane thickness should be in angstroms. (Default: 38)
+
+-dm, --dual_membrane : For a complex spanning two membranes, oriented by MemPrO -dm: the distance between the membrane centres in angstroms, as MemPrO reports it (`Iter-Membrane distance` in `info_rank_1.txt`). MemPrOD models one flat membrane, so each membrane is predicted on its own: the part of the protein within half the membrane's thickness plus 40 A of it is cut out, shifted so that membrane is at z = 0, and predicted with the grid kept in the protein's x,y axes (`-norot`), so both membranes' maps share the input's frame. The membrane at -z (MemPrO's inner membrane) is written to `Inner/`, the one at +z (the outer membrane) to `Outer/`. Build the system with Insane4MemPrO `-ps` (half the distance, in nm), `-def Inner/Membrane_Data/` and `-def_o Outer/Membrane_Data/`; each membrane is deformed and moved by its own `Z_change`, and the protein stays where MemPrO put it. On MacAB-TolC the outer membrane thins around TolC's barrel and the inner membrane deforms only slightly around MacB.
+
+-mt_o, --outer_membrane_thickness : With `-dm`, the undeformed thickness of the membrane at +z in angstroms, e.g. MemPrO's `Outer Membrane Thickness`. (Default: -mt)
+
+-norot, --no_rotation : Keep the protein's x,y axes for the grid instead of turning the protein about z to fit the grid to it. Set by `-dm` for each membrane.
 
 -wb, --write_bfactors : Toggles the writing of charge at each membrane segment rather than thinning/thickening.
 

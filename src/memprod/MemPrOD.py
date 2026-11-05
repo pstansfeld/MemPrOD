@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import time
 from mempro import MemPrO as ori
 import argparse
+import subprocess
 from scipy.optimize import OptimizeResult
 from scipy.optimize._optimize import _line_search_wolfe12, _LineSearchError
 
@@ -26,6 +27,59 @@ from scipy.optimize._optimize import _line_search_wolfe12, _LineSearchError
 def pdb_atom_line(serial,name,resname,chain,resnum,x,y,z,occ=1.0,bfac=0.0):
 	name = name if len(name) == 4 else " "+name
 	return "ATOM  %5d %-4s %3s %1s%4d    %8.3f%8.3f%8.3f%6.2f%6.2f\n"%(serial%100000,name[:4],resname[:3],chain[:1],resnum%10000,x,y,z,occ,bfac)
+
+#Double membranes (-dm): MemPrOD's model is one flat membrane at z = 0, so each membrane of a periplasm-spanning
+#complex is predicted on its own. The part of the protein within reach of the membrane is cut out and shifted so that
+#membrane is at z = 0, and MemPrOD is run on it with the grid kept in the protein's x,y axes (-norot), so both
+#membranes' maps share the input's frame. The membrane at -z goes to Inner/ (Insane4MemPrO -def, the -l/-u
+#membrane), the one at +z to Outer/ (-def_o, the -lo/-uo membrane); each records its centre in Membrane_centre.npz.
+DM_MARGIN = 40.0  #A beyond each membrane's half thickness that is kept
+
+def dual_membrane_runs(args,orient_dir):
+	dist = float(args.dual_membrane)
+	if(dist <= 0):
+		print("ERROR: Could not read value of -dm. Must be the distance between the membrane centres in A (MemPrO's Iter-Membrane distance).")
+		exit()
+	lines = [l for l in open(args.file_name) if l.startswith(("ATOM","HETATM"))]
+	#Options passed on to each membrane's run, without the ones set here
+	skip = {"-f":1,"--file_name":1,"-o":1,"--output":1,"-dm":1,"--dual_membrane":1,"-mt":1,"--membrane_thickness":1,"-mt_o":1,"--outer_membrane_thickness":1}
+	argv,i = [],1
+	while i < len(sys.argv):
+		if sys.argv[i] in skip:
+			i += 1+skip[sys.argv[i]]
+			continue
+		argv.append(sys.argv[i])
+		i += 1
+	membranes = [("Inner",-dist/2,float(args.membrane_thickness)),("Outer",dist/2,float(args.outer_membrane_thickness or args.membrane_thickness))]
+	surfaces = []
+	for name,centre,thick in membranes:
+		sub_dir = orient_dir+name+"/"
+		if(not os.path.exists(sub_dir)):
+			os.mkdir(sub_dir)
+		part = []
+		for l in lines:
+			z = float(l[46:54])
+			if abs(z-centre) < thick/2+DM_MARGIN:
+				part.append(l[:46]+"%8.3f"%(z-centre)+l[54:])
+		if(len(part) == 0):
+			print("ERROR: No protein within "+str(thick/2+DM_MARGIN)+" A of the membrane at z = "+str(centre)+" A")
+			exit()
+		part_fn = sub_dir+"protein_part.pdb"
+		open(part_fn,"w").writelines(part)
+		print("Membrane at z = %.1f A (%s): %d atoms/beads within %.0f A, thickness %.0f A"%(centre,name,len(part),thick/2+DM_MARGIN,thick))
+		run = subprocess.run([sys.executable,os.path.abspath(__file__),"-f",part_fn,"-o",sub_dir,"-mt",str(thick),"-norot"]+argv)
+		if(run.returncode != 0):
+			print("ERROR: MemPrOD failed for the membrane at z = "+str(centre)+" A")
+			exit(run.returncode)
+		np.savez(sub_dir+"Membrane_Data/Membrane_centre.npz",centre)
+		for l in open(sub_dir+"Deformations.pdb"):
+			if l.startswith("ATOM"):
+				surfaces.append((float(l[30:38]),float(l[38:46]),float(l[46:54])+centre,float(l[60:66])))
+	#Both membranes' surfaces in the input's frame, for viewing with the protein
+	with open(orient_dir+"Deformations.pdb","w") as f:
+		for k,(x,y,z,b) in enumerate(surfaces):
+			f.write(pdb_atom_line(k+1,"BB","DUM","Z",1,x,y,z,1.0,b))
+	print("Deformations of both membranes in "+orient_dir+"Inner/ and "+orient_dir+"Outer/ (Membrane_Data for Insane4MemPrO -def and -def_o), and together in "+orient_dir+"Deformations.pdb")
 
 def bfgs_minimize(fun,x0,jac,gtol=1e-5,maxiter=None,c1=1e-4,c2=0.9,xrtol=0):
 	x0 = np.asarray(x0,dtype=float).flatten()
@@ -118,6 +172,11 @@ def main():
 	parser.set_defaults(smooth=5)
 	parser.add_argument("-zshift","--zshift",help="Z shift of membrane for proteins that are misoriented due to lack of deformations.")
 	parser.set_defaults(zshift=0)
+	parser.add_argument("-dm","--dual_membrane",help="Double membrane: the distance (A) between the membrane centres, as MemPrO -dm reports it (Iter-Membrane distance). Each membrane's deformations are predicted separately: the membrane at -z in Inner/, at +z in Outer/")
+	parser.set_defaults(dual_membrane=None)
+	parser.add_argument("-mt_o","--outer_membrane_thickness",help="With -dm, initial thickness of the membrane at +z in Angstroms (Default: -mt)")
+	parser.set_defaults(outer_membrane_thickness=None)
+	parser.add_argument("-norot","--no_rotation",action="store_true",help="Keep the protein's x,y axes for the grid instead of rotating it to fit the protein (set by -dm)")
 	parser.add_argument("-mt","--membrane_thickness",help="Initial thickness of membrane in Angstroms (Default: 38)")
 	parser.set_defaults(membrane_thickness=38.0)
 	parser.add_argument("-wb","--write_bfactors",action="store_true",help="Toggle writing charge at each membrane segment instead of z position.")
@@ -224,6 +283,10 @@ def main():
 			os.mkdir(orient_dir)
 			
 	
+	if(args.dual_membrane is not None):
+		dual_membrane_runs(args,orient_dir)
+		return
+
 	locdir = orient_dir+"LocData/"
 	if(not os.path.exists(locdir)):
 		os.mkdir(locdir)
@@ -598,7 +661,7 @@ def main():
 		return carry,ind
 	
 	carry,_ = jax.lax.scan(min_extent,[0.0,jnp.inf],jnp.arange(200))
-	nang = carry[0]
+	nang = 0.0 if args.no_rotation else carry[0]
 	rot_mat = jnp.array([[jnp.cos(nang),-jnp.sin(nang),0],[jnp.sin(nang),jnp.cos(nang),0],[0,0,1]])
 	rot_mat_inv = jnp.array([[jnp.cos(-nang),-jnp.sin(-nang),0],[jnp.sin(-nang),jnp.cos(-nang),0],[0,0,1]])
 	surf_poses = jnp.dot(rot_mat,surf_poses.T).T
