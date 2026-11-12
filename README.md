@@ -15,7 +15,7 @@ To install MemPrOD run the following:
 This will install MemPrO, Insane4MemPrO and MemPrOD. For NVIDIA GPU support in the MemPrO parts (Linux, CUDA 12), use:
 >pip install "memprod[gpu]"
 
-Otherwise, clone the GitHub repository and install it with `pip install .` from the repository folder. Python 3.11 or later is required; this installs MemPrO 0.2.1 or later, JAX (0.6.0–0.12) and SciPy.
+Otherwise, clone the GitHub repository and install it with `pip install .` from the repository folder. Python 3.11 or later is required; this installs MemPrO 0.6.0 or later, JAX (0.6.0–0.12) and SciPy.
 
 The Martini 3 force field bundled with MemPrO is used by default. To use a different one, supply it with `-itp`, or set the following environment variable (for Linux users):
 
@@ -59,6 +59,8 @@ MemPrOD will output the following data:
   
 * Run_command.txt - A text file containing the full run command for later reference.
 
+* Topology - For atomistic inputs, a folder with the topology of each chain as on MemProtMD (topology_chain_X.png, topology.json, residues.csv; see `mempro-topology` in the MemPrO README): helices and strands as arrows by height, the number of transmembrane helices and strands, and the membrane lines following the predicted upper and lower surfaces. The spans are counted with MemPrO's flat boundaries: those of `info_rank_N.txt` if it is in the folder of the input, otherwise `-mt` about z = 0. A warning is printed if MemPrOD moved the membrane more than 2 A from there. Which spans are lipid-facing is a geometric estimate. Needs a MemPrO version with `mempro-topology`; turn off with `-notopo`.
+
 With `-dm` (two membranes) the output folder holds `Inner/` (the membrane at -z) and `Outer/` (the membrane at +z), each with all of the above for that membrane, its part of the protein (`protein_part.pdb`) and `Membrane_Data/Membrane_centre.npz`, and a `Deformations.pdb` with both membranes' surfaces in the input's frame.
 
 ## Flags
@@ -93,6 +95,8 @@ MemPrOD takes the following flags as input:
 -dm, --dual_membrane : For a complex spanning two membranes, oriented by MemPrO -dm: the distance between the membrane centres in angstroms, as MemPrO reports it (`Iter-Membrane distance` in `info_rank_1.txt`). MemPrOD models one flat membrane, so each membrane is predicted on its own: the part of the protein within half the membrane's thickness plus 40 A of it is cut out, shifted so that membrane is at z = 0, and predicted with the grid kept in the protein's x,y axes (`-norot`), so both membranes' maps share the input's frame. The membrane at -z (MemPrO's inner membrane) is written to `Inner/`, the one at +z (the outer membrane) to `Outer/`. Build the system with Insane4MemPrO `-ps` (half the distance, in nm), `-def Inner/Membrane_Data/` and `-def_o Outer/Membrane_Data/`; each membrane is deformed and moved by its own `Z_change`, and the protein stays where MemPrO put it. On MacAB-TolC the outer membrane thins around TolC's barrel and the inner membrane deforms only slightly around MacB.
 
 -mt_o, --outer_membrane_thickness : With `-dm`, the undeformed thickness of the membrane at +z in angstroms, e.g. MemPrO's `Outer Membrane Thickness`. (Default: -mt)
+
+-notopo, --no_topology : Do not write the Topology folder.
 
 -norot, --no_rotation : Keep the protein's x,y axes for the grid instead of turning the protein about z to fit the grid to it. Set by `-dm` for each membrane.
 

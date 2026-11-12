@@ -35,6 +35,29 @@ def pdb_atom_line(serial,name,resname,chain,resnum,x,y,z,occ=1.0,bfac=0.0):
 #membrane), the one at +z to Outer/ (-def_o, the -lo/-uo membrane); each records its centre in Membrane_centre.npz.
 DM_MARGIN = 40.0  #A beyond each membrane's half thickness that is kept
 
+#The topology of each chain (mempro-topology) with the membrane lines following the predicted surfaces, in Topology/.
+#Atomistic input only. The membrane boundaries are MemPrO's: info_rank_N.txt beside the input if there is one, otherwise -mt
+#(and -dm, -mt_o) about z = 0
+def write_topology(args,orient_dir):
+	try:
+		from mempro import topology
+	except ImportError:
+		print("Topology not written: it needs a version of MemPrO with mempro-topology.")
+		return
+	print("Writing topology...")
+	#Never the reason for a run to fail: the deformations are already written
+	try:
+		info_fn = topology.find_info(args.file_name)
+		options = {}
+		if(info_fn is None):
+			options["thickness"] = float(args.membrane_thickness)
+			if(args.dual_membrane is not None):
+				options["distance"] = float(args.dual_membrane)
+				options["outer_thickness"] = float(args.outer_membrane_thickness or args.membrane_thickness)
+		topology.write_topology(args.file_name,orient_dir+"Topology",info_fn,orient_dir,quiet=True,**options)
+	except Exception as err:
+		print("WARNING: Could not write the topology: "+str(err))
+
 def dual_membrane_runs(args,orient_dir):
 	dist = float(args.dual_membrane)
 	if(dist <= 0):
@@ -74,7 +97,7 @@ def dual_membrane_runs(args,orient_dir):
 		part_fn = sub_dir+"protein_part.pdb"
 		open(part_fn,"w").writelines(part)
 		print("Membrane at z = %.1f A (%s): %d atoms/beads within %.0f A, thickness %.0f A"%(centre,name,len(part),thick/2+DM_MARGIN,thick))
-		run = subprocess.run([sys.executable,os.path.abspath(__file__),"-f",part_fn,"-o",sub_dir,"-mt",str(thick),"-norot"]+argv)
+		run = subprocess.run([sys.executable,os.path.abspath(__file__),"-f",part_fn,"-o",sub_dir,"-mt",str(thick),"-norot","-notopo"]+[a for a in argv if a not in ("-notopo","--no_topology")])
 		if(run.returncode != 0):
 			print("ERROR: MemPrOD failed for the membrane at z = "+str(centre)+" A")
 			exit(run.returncode)
@@ -183,6 +206,7 @@ def main():
 	parser.set_defaults(dual_membrane=None)
 	parser.add_argument("-mt_o","--outer_membrane_thickness",help="With -dm, initial thickness of the membrane at +z in Angstroms (Default: -mt)")
 	parser.set_defaults(outer_membrane_thickness=None)
+	parser.add_argument("-notopo","--no_topology",action="store_true",help="Do not write the topology of each chain (Topology/; written for atomistic inputs)")
 	parser.add_argument("-norot","--no_rotation",action="store_true",help="Keep the protein's x,y axes for the grid instead of rotating it to fit the protein (set by -dm)")
 	parser.add_argument("-mt","--membrane_thickness",help="Initial thickness of membrane in Angstroms (Default: 38)")
 	parser.set_defaults(membrane_thickness=38.0)
@@ -292,6 +316,8 @@ def main():
 	
 	if(args.dual_membrane is not None):
 		dual_membrane_runs(args,orient_dir)
+		if(not args.no_topology):
+			write_topology(args,orient_dir)
 		return
 
 	locdir = orient_dir+"LocData/"
@@ -1291,6 +1317,9 @@ def main():
 	run_txt = open(orient_dir+"Run_command.txt","w")
 	run_txt.write(" ".join(sys.argv))
 	run_txt.close()
+	
+	if(not args.no_topology):
+		write_topology(args,orient_dir)
 	
 	print("Total time:",str(np.format_float_positional(time.time()-tot_time,precision=3))+"s")
 
