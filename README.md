@@ -27,7 +27,7 @@ MemPrOD can be run without installing anything locally, using the [MemPrO Colab 
 
 ## Outputs
 
-MemPrOD is intended to run on either CG or atomistic PDB files of an oriented protein (e.g. `oriented_rank_1.pdb` from MemPrO). The input must contain the protein only: remove MemPrO's dummy membrane (`DUM`) beads first, for example with `grep -v " DUM " oriented_rank_1.pdb > protein.pdb`.
+MemPrOD is intended to run on either CG or atomistic PDB files of an oriented protein, e.g. `oriented_rank_1.pdb` from MemPrO, or `oriented.pdb` from MemPrO `-sl`. MemPrO's dummy membrane (`DUM`) beads are left out automatically; the protein without them is written to `protein.pdb` in the output folder. From an `oriented.pdb` written by MemPrO `-sl`, the membrane thickness (`-mt`) and, for a double membrane, the distance between the membranes and the outer thickness (`-dm`, `-mt_o`) are read from its `REMARK MemPrO` lines unless given on the command line.
 
 MemPrOD will output the following data:
 
@@ -96,6 +96,8 @@ MemPrOD takes the following flags as input:
 
 -mt_o, --outer_membrane_thickness : With `-dm`, the undeformed thickness of the membrane at +z in angstroms, e.g. MemPrO's `Outer Membrane Thickness`. (Default: -mt)
 
+-sl, --streamlined : Write a single file of coordinates only: `deformed.pdb` in the output folder, holding the protein followed by the predicted upper and lower surface of each membrane as `DUM` beads (B-factor: how far the surface moved out from (+) or in towards (-) the membrane centre, in angstroms). The input's `REMARK MemPrO` lines, the run command and how far the membrane moved along z are at its head. None of the other outputs are written (maps, contact files, LocData, Membrane_Data, Topology), so a system with the deformations cannot be built from it with Insane4MemPrO `-def`. The deformations are the same as in a normal run.
+
 -notopo, --no_topology : Do not write the Topology folder.
 
 -norot, --no_rotation : Keep the protein's x,y axes for the grid instead of turning the protein about z to fit the grid to it. Set by `-dm` for each membrane.
@@ -120,15 +122,11 @@ Before we can predict deforamtions we will first need to orient the protein. If 
 
 >python PATH/TO/MemPrO.py -f 4bwz.pdb
 
-This will create a folder called "Orient". To get the oriented protein run the following:
+This will create a folder called "Orient", with the oriented protein and MemPrO's dummy membrane in "Orient/Rank_1/oriented_rank_1.pdb". MemPrOD leaves the dummy membrane out itself, so we can now run the following command:
 
-> sed '/DUM/d' ./Orient/Rank_1/oriented_rank_1.pdb > 4bwz-oriented.pdb
+>python PATH/TO/MemPrOD.py -f Orient/Rank_1/oriented_rank_1.pdb
 
-This will create a file called "4bwz-oriented.pdb". We can now run the following command:
-
->python PATH/TO/MemPrOD.py -f 4bwz-oriented.pdb
-
-This should take under a minute on a typical CPU and will create a folder called "Deformations". In this folder we can find "Deformations.pdb" Load "4bwz-oriented.pdb" and "Deformations.pdb" in PyMOL. We can improve the clarity of the deformations by running the following command in PyMOL:
+This should take under a minute on a typical CPU and will create a folder called "Deformations". In this folder we can find "Deformations.pdb" Load "protein.pdb" (the protein without the dummy membrane) and "Deformations.pdb" from this folder in PyMOL. We can improve the clarity of the deformations by running the following command in PyMOL:
 
 >spectrum b, red_white_blue,Deformations,minimum=-10,maximum=10
 
