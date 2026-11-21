@@ -1330,7 +1330,47 @@ def main():
 	
 	
 	print("Done in:", str(np.format_float_positional(time.time()-timer,precision=3))+"s")
-	
+
+	#Energies of the deformed membrane against references made with the same function, so they can be compared
+	#between proteins: a flat membrane at its best depth, and the membrane far from the protein (protein in water).
+	#Absolute values carry a constant per-cell term, so only the differences (rel_*) mean anything.
+	@jax.jit
+	def energy_parts(in_xy):
+		k = float(args.k1_const)
+		k2 = float(args.k2_const)
+		xy = in_xy[:grid_size_x*grid_size_y*2].reshape((grid_size_x,grid_size_y,2))
+		zd = in_xy[-1]/5
+		nb = nbh_calc(xy,k,k2,zd)
+		return jnp.array([jnp.sum(calc_graphs(xy,zd)),jnp.sum(nb[...,0]),jnp.sum(nb[...,1])])
+	flat_zs = np.zeros((grid_size_x,grid_size_y,2))
+	flat_zs[:,:,1] = mem_data[1]
+	def flat_at(zd):
+		return float(total_pot_fun(jnp.array(np.concatenate((flat_zs.flatten(),[zd*5.0])))))
+	zgrid = np.arange(-30.0,30.01,2.0)
+	ef = [flat_at(z) for z in zgrid]
+	zbest = zgrid[int(np.argmin(ef))]
+	zfine = np.arange(zbest-2.0,zbest+2.01,0.25)
+	ef2 = [flat_at(z) for z in zfine]
+	e_flat,z_flat = float(np.min(ef2)),float(zfine[int(np.argmin(ef2))])
+	e_out = min(flat_at(80.0),flat_at(-80.0))
+	parts = np.array(energy_parts(jnp.array(min_out.x)))
+	e_def = float(np.sum(parts))
+	energy_lines = [
+		"E_def: %.3f"%e_def,
+		"E_def_interaction: %.3f"%parts[0],
+		"E_def_neighbour: %.3f"%parts[1],
+		"E_def_thickness: %.3f"%parts[2],
+		"E_flat: %.3f (membrane centre z %.2f A)"%(e_flat,z_flat),
+		"E_out: %.3f"%e_out,
+		"rel_flat (E_flat-E_out): %.3f"%(e_flat-e_out),
+		"rel_def (E_def-E_out): %.3f"%(e_def-e_out),
+		"gain (E_def-E_flat): %.3f"%(e_def-e_flat),
+		"k1: %s k2: %s"%(args.k1_const,args.k2_const),
+	]
+	with open(orient_dir+"Energy.txt","w") as fh:
+		fh.write("\n".join(energy_lines)+"\n")
+	print("\n".join(energy_lines))
+
 	#calcuating graphs, contacts and general post processing
 	print("Post processing...")
 	timer = time.time()
