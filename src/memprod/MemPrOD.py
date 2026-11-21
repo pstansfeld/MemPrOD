@@ -17,6 +17,7 @@ import shutil
 import re
 from scipy.optimize import OptimizeResult
 from scipy.optimize._optimize import _line_search_wolfe12, _LineSearchError
+from scipy.linalg.blas import dgemm
 
 
 #BFGS as in scipy.optimize.minimize(method="BFGS") (scipy/optimize/_optimize.py, _minimize_bfgs; BSD licence),
@@ -207,15 +208,89 @@ def bfgs_minimize(fun,x0,jac,gtol=1e-5,maxiter=None,c1=1e-4,c2=0.9,xrtol=0):
 			break
 		rhok_inv = np.dot(yk,sk)
 		rhok = 1000.0 if rhok_inv == 0. else 1./rhok_inv
+		#Hk stays symmetric, so yk.Hk = Hk.yk: one pass over Hk instead of two
 		Hy = np.dot(Hk,yk)
-		yH = np.dot(yk,Hk)
-		cs = (rhok*rhok*np.dot(yk,Hy)+rhok)*sk-rhok*yH
-		Hk += np.dot(np.stack((sk,-rhok*Hy),axis=1),np.stack((cs,sk)))
+		cs = (rhok*rhok*np.dot(yk,Hy)+rhok)*sk-rhok*Hy
+		#Rank-2 update Hk += sk cs^T - rhok Hy sk^T in place (one read and write of Hk, no N x N temporary).
+		#Hk is C-ordered, so its transpose is the Fortran-ordered matrix BLAS updates: Hk^T += cs sk^T - rhok sk Hy^T
+		dgemm(1.0,np.stack((cs,sk),axis=1),np.stack((sk,-rhok*Hy)),beta=1.0,c=Hk.T,overwrite_c=True)
 	if warnflag != 2 and k >= maxiter:
 		warnflag = 1
 	elif warnflag != 2 and (np.isnan(gnorm) or np.isnan(old_fval) or np.isnan(xk).any()):
 		warnflag = 3
 	return OptimizeResult(fun=old_fval,jac=gfk,hess_inv=Hk,status=warnflag,success=(warnflag == 0),x=xk,nit=k)
+
+
+#Limited-memory BFGS with the same line search, stopping rules and result as bfgs_minimize. It keeps the last m
+#(s,y) pairs instead of the N x N inverse Hessian (N = 2 x grid cells + 1, so 48-225 MB for typical grids), which
+#makes each iteration O(mN) and stops parallel runs competing for memory bandwidth.
+def lbfgs_minimize(fun,x0,jac,gtol=1e-5,maxiter=None,c1=1e-4,c2=0.9,xrtol=0,m=10):
+	x0 = np.asarray(x0,dtype=float).flatten()
+	N = len(x0)
+	if maxiter is None:
+		maxiter = N*200
+	cache = {}
+	def cached(fn,key):
+		def wrapped(x):
+			if key not in cache or not np.array_equal(cache[key][0],x):
+				cache[key] = (np.array(x,copy=True),fn(x))
+			return cache[key][1]
+		return wrapped
+	f = cached(fun,"f")
+	myfprime = cached(jac,"g")
+	old_fval = f(x0)
+	gfk = myfprime(x0)
+	k = 0
+	S,Y,R = [],[],[]
+	old_old_fval = old_fval+np.linalg.norm(gfk)/2
+	xk = x0
+	warnflag = 0
+	gnorm = np.max(np.abs(gfk))
+	while (gnorm > gtol) and (k < maxiter):
+		#Two-loop recursion for pk = -H gfk, with H0 = (s.y/y.y) I from the newest pair (I on the first step)
+		q = gfk.copy()
+		alphas = []
+		for s,y,r in zip(reversed(S),reversed(Y),reversed(R)):
+			a = r*np.dot(s,q)
+			alphas.append(a)
+			q -= a*y
+		if len(S) > 0:
+			q *= np.dot(S[-1],Y[-1])/np.dot(Y[-1],Y[-1])
+		for (s,y,r),a in zip(zip(S,Y,R),reversed(alphas)):
+			b = r*np.dot(y,q)
+			q += (a-b)*s
+		pk = -q
+		try:
+			alpha_k,fc,gc,old_fval,old_old_fval,gfkp1 = _line_search_wolfe12(f,myfprime,xk,pk,gfk,old_fval,old_old_fval,amin=1e-100,amax=1e100,c1=c1,c2=c2)
+		except _LineSearchError:
+			warnflag = 2
+			break
+		sk = alpha_k*pk
+		xk = xk+sk
+		if gfkp1 is None:
+			gfkp1 = myfprime(xk)
+		yk = gfkp1-gfk
+		gfk = gfkp1
+		k += 1
+		gnorm = np.max(np.abs(gfk))
+		if gnorm <= gtol:
+			break
+		if alpha_k*np.linalg.norm(pk) <= xrtol*(xrtol+np.linalg.norm(xk)):
+			break
+		if not np.isfinite(old_fval):
+			warnflag = 2
+			break
+		sy = np.dot(yk,sk)
+		#Pairs without positive curvature would make H indefinite; skip them (the dense version uses rho = 1000 if s.y = 0)
+		if sy > 1e-10*np.linalg.norm(sk)*np.linalg.norm(yk):
+			S.append(sk); Y.append(yk); R.append(1.0/sy)
+			if len(S) > m:
+				S.pop(0); Y.pop(0); R.pop(0)
+	if warnflag != 2 and k >= maxiter:
+		warnflag = 1
+	elif warnflag != 2 and (np.isnan(gnorm) or np.isnan(old_fval) or np.isnan(xk).any()):
+		warnflag = 3
+	return OptimizeResult(fun=old_fval,jac=gfk,hess_inv=None,status=warnflag,success=(warnflag == 0),x=xk,nit=k)
 
 
 def main():
@@ -232,6 +307,10 @@ def main():
 	parser.add_argument("-o","--output",help="Name of the output directory (Default: Deformations)")
 	parser.add_argument("-ni","--iters",help="Number of minimisation iterations (Default: 300)")
 	parser.set_defaults(iters=300)
+	parser.add_argument("-min","--minimiser",choices=["bfgs","lbfgs"],help="Minimiser: bfgs (dense inverse Hessian, memory N^2 for N = 2 x grid cells) or lbfgs (limited memory, much faster when many runs share a machine) (Default: bfgs)")
+	parser.set_defaults(minimiser="bfgs")
+	parser.add_argument("-lbfgs_m","--lbfgs_memory",help="Number of (s,y) pairs L-BFGS keeps (Default: 10)")
+	parser.set_defaults(lbfgs_memory=10)
 	parser.add_argument("-ng","--grid_density",help="Spacing of grid points (Default: 3)")
 	parser.set_defaults(grid_density=3)
 	parser.add_argument("-ncav","--no_cavity_surface",action="store_false",help="Toggle use of a surface finder that is more accurate but more expensive.")
@@ -637,19 +716,24 @@ def main():
 		np.savez(locdir+"Ylin.npz",ys)
 		np.savez(memdir+"Xlin.npz",xs)
 		np.savez(memdir+"Ylin.npz",ys)
+		#Membrane structure of every cell in one call, and NumPy for the per-cell work (one eager JAX call per
+		#operation per cell made this loop a large part of the run)
+		ms_all = np.array(jax.vmap(jax.vmap(get_mem_struc))(jnp.array(grid_in[:,:,1])))
+		ms_av = np.array(get_mem_struc(grid_in[0,0,1]))
+		bgrid_o_np = np.asarray(bgrid_o)
+		grid_ban = np.asarray(grid_ban)
 		for i in range(nx):
 			for j in range(ny):
 				if(grid_ban[i,j] == 1):
-					ms = get_mem_struc(grid_in[i,j,1])
-					ms_av = get_mem_struc(grid_in[0,0,1])
+					ms = ms_all[i,j]
 					z_pluss = [ms[0],ms[7]]
 					z_pluss_av = [ms_av[0],ms_av[7]]
 					for nn,zz in enumerate(z_pluss):
 						pm1 = (nn-0.5)*2
 						zp = zz+start_z/5
 						z_dev = np.mean(grid_in[0,:,0]+z_pluss_av[nn]+start_z/5)
-						zp_vpos = jnp.array(((grid_in[i,j,0]+zp+vext)/(2*vext))*vert_grid_size,dtype=int)
-						zp_vposc = jnp.array(((grid_in[i,j,0]+vext)/(2*vext))*vert_grid_size,dtype=int)
+						zp_vpos = int(((grid_in[i,j,0]+zp+vext)/(2*vext))*vert_grid_size)
+						zp_vposc = int(((grid_in[i,j,0]+vext)/(2*vext))*vert_grid_size)
 						if(zp_vpos < zp_vposc):
 							lb = zp_vpos
 							rb = zp_vposc
@@ -665,7 +749,7 @@ def main():
 							lb=0
 						if(rb<0):
 							rb=0
-						covp = jnp.sum(bgrid_o[i,j,lb:rb])/lenny
+						covp = np.sum(bgrid_o_np[i,j,lb:rb])/lenny if lenny != 0 else np.nan
 						if(covp > 0.6):
 							BanGrid[i,j,nn] = 1
 							Data[i,j,nn] = grid_in[i,j,0]+zp
@@ -854,8 +938,13 @@ def main():
 		xgrid,ygrid = put_into_grid([surf_poses[:,0],surf_poses[:,1]],[2*x_ext,2*y_ext],[nxx,nyy],[-x_ext,-y_ext])
 		xgrid = np.array(xgrid)
 		ygrid = np.array(ygrid)
-		big_grid = np.zeros((grid_size_x,grid_size_y,no_beads+1),dtype=int)-1
-		big_grid[:,:,no_beads] = 0
+		#As many slots as the fullest bin holds, not one per bead (cells x beads ints: 4 GB for a Piezo trimer).
+		#Readers use only the count (last slot) and the first max count slots, so the contents are the same.
+		counts = np.zeros((grid_size_x,grid_size_y),dtype=int)
+		np.add.at(counts,(xgrid,ygrid),1)
+		n_slots = int(counts.max()) if no_beads > 0 else 0
+		big_grid = np.zeros((grid_size_x,grid_size_y,n_slots+1),dtype=int)-1
+		big_grid[:,:,n_slots] = 0
 		for bind in range(no_beads):
 			big_grid[xgrid[bind],ygrid[bind],big_grid[xgrid[bind],ygrid[bind],-1]] = bind
 			big_grid[xgrid[bind],ygrid[bind],-1] += 1
@@ -887,8 +976,7 @@ def main():
 	def allo_grid_vmap(cutoff_val,big_grid,surf_poses):
 		max_beads = int(jnp.max(big_grid[:,:,-1]))
 		sq = jnp.array([[0,0],[-1,0],[1,0],[0,-1],[0,1],[-1,1],[-1,-1],[1,1],[1,-1]],dtype=int)
-		@partial(jax.vmap,in_axes=0)
-		def agrid_vmap(inds):
+		def candidates(inds):
 			ind2 = inds[0]
 			ind3 = inds[1]
 			indx,indy = put_into_grid([xs[ind2],ys[ind3]],[2*x_ext,2*y_ext],[nxx,nyy],[-x_ext,-y_ext])
@@ -896,13 +984,25 @@ def main():
 			bginds = big_grid[(indx+sq[:,0])%grid_size_x,(indy+sq[:,1])%grid_size_y][:,:max_beads].T.reshape(-1)
 			dists = jnp.linalg.norm(surf_poses[bginds][:,0:2]-jnp.array([xs[ind2],ys[ind3]]),axis=1)
 			keep = (bginds != -1)*(dists < cutoff_val)
-			slot = jnp.where(keep,jnp.cumsum(keep)-1,no_beads+1)
-			grid_p = jnp.zeros((no_beads+1,2),dtype=float)-1
+			return bginds,dists,keep
+		#Each cell gets as many slots as the fullest cell keeps, with the count in the last one, instead of a slot for
+		#every bead (cells x beads: GBs for large proteins, out of GPU memory). Everything that reads the grid uses only
+		#the count and the first max-count slots, so the contents are the same. A counting pass sizes it; both passes
+		#go through the cells in batches so the candidate arrays stay small.
+		n_kept = int(jnp.max(jax.lax.map(lambda inds: jnp.sum(candidates(inds)[2]),indxes,batch_size=512)))
+		def agrid(inds):
+			bginds,dists,keep = candidates(inds)
+			slot = jnp.where(keep,jnp.cumsum(keep)-1,n_kept+1)
+			grid_p = jnp.zeros((n_kept+1,2),dtype=float)-1
 			grid_p = grid_p.at[slot,0].set(bginds,mode="drop").at[slot,1].set(dists,mode="drop")
-			grid_p = grid_p.at[no_beads,0].set(jnp.sum(keep)).at[no_beads,1].set(0)
+			grid_p = grid_p.at[n_kept,0].set(jnp.sum(keep)).at[n_kept,1].set(0)
 			return grid_p
-		grid_p = agrid_vmap(indxes)
-		grid = grid_p.reshape((grid_size_x,grid_size_y,no_beads+1,2))
+		grid_p = jax.lax.map(agrid,indxes,batch_size=512)
+		if(os.environ.get("MEMPROD_CHECK")):
+			ref = np.array(jax.vmap(agrid)(indxes))
+			new = np.array(grid_p)
+			print("MEMPROD_CHECK allo_grid (cutoff %g): slots %d, bead indices equal %s, max |diff| dists %g"%(cutoff_val,n_kept,np.array_equal(ref[...,0],new[...,0]),np.max(np.abs(ref[...,1]-new[...,1]))),flush=True)
+		grid = grid_p.reshape((grid_size_x,grid_size_y,n_kept+1,2))
 		return grid
 	
 	grid = allo_grid_vmap(cutoff,big_grid,surf_poses).block_until_ready()
@@ -1053,12 +1153,58 @@ def main():
 				bgrid[:,:,k] = np.maximum(bgrid[:,:,k],ndimage.binary_dilation(reach,structure=np.ones((3,3))))
 		return jnp.array(bgrid),jnp.array(bgrid_o)
 	
+	#NumPy versions of accessable and fill_mid for all height slices at once (last axis). They give the same result:
+	#the same 2x2 test with JAX's index rules (-1 wraps to the last row, n is clamped to n-1), and the same four sweeps
+	#of the fill in the same order. Under vmap, every lax.cond in the scans became a select over the whole carry at
+	#every step, which made this stage memory-bound (about 20x slower when many runs share a machine).
+	def accessable_np(g):
+		nx_,ny_ = g.shape[0],g.shape[1]
+		im = np.concatenate(([nx_-1],np.arange(nx_-1)))
+		ip = np.minimum(np.arange(nx_)+1,nx_-1)
+		jm = np.concatenate(([ny_-1],np.arange(ny_-1)))
+		jp = np.minimum(np.arange(ny_)+1,ny_-1)
+		t1 = g+g[im]+g[im][:,jm]+g[:,jm]
+		t2 = g+g[ip]+g[ip][:,jm]+g[:,jm]
+		t3 = g+g[im]+g[im][:,jp]+g[:,jp]
+		t4 = g+g[ip]+g[ip][:,jp]+g[:,jp]
+		return ((t1 == 4)|(t2 == 4)|(t3 == 4)|(t4 == 4)).astype(g.dtype)
+	numer_cells = grid_size_x*grid_size_y
+	fill_nbs = []
+	for f in range(numer_cells):
+		ix,iy = f%grid_size_x,f//grid_size_x
+		fill_nbs.append(np.unique([((iy+dy)%grid_size_y)*grid_size_x+(ix+dx)%grid_size_x for dx in (-1,0,1) for dy in (-1,0,1)]))
+	transp_order = np.arange(numer_cells).reshape(grid_size_x,grid_size_y).T.reshape(numer_cells)
+	fill_orders = [np.arange(numer_cells),numer_cells-1-np.arange(numer_cells),transp_order,numer_cells-1-transp_order]
+	def fill_mid_np(gb,tol):
+		ns = gb.shape[2]
+		gbf = gb.transpose(1,0,2).reshape(numer_cells,ns)
+		queued = np.zeros((numer_cells,ns))
+		checked = np.zeros((numer_cells,ns),dtype=bool)
+		queued[0] = 1
+		for order in fill_orders:
+			for ind in order:
+				act = (queued[ind] > 0)&(~checked[ind])
+				if(not act.any()):
+					continue
+				checked[ind] |= act
+				free = act&(gbf[ind] <= tol)
+				if(free.any()):
+					queued[fill_nbs[ind]] += free
+		return checked.astype(gb.dtype).reshape(grid_size_y,grid_size_x,ns).transpose(1,0,2)
+
 	#Each height slice is filled independently, so all slices are processed together
-	def fill_out_slice(bslice):
-		acc = accessable(bslice)
-		tempb = fill_mid(1-acc,0.5)
-		return fill_mid(1-tempb,0.5),tempb,acc
-	bgrid,bgrid_o,bgrid_acc = jax.vmap(fill_out_slice,in_axes=2,out_axes=2)(bgrid)
+	bgrid_np = np.array(bgrid)
+	bgrid_acc = accessable_np(bgrid_np)
+	bgrid_o = fill_mid_np(1-bgrid_acc,0.5)
+	bgrid_new = fill_mid_np(1-bgrid_o,0.5)
+	if(os.environ.get("MEMPROD_CHECK")):
+		def fill_out_slice(bslice):
+			acc = accessable(bslice)
+			tempb = fill_mid(1-acc,0.5)
+			return fill_mid(1-tempb,0.5),tempb,acc
+		ref = [np.array(r) for r in jax.vmap(fill_out_slice,in_axes=2,out_axes=2)(bgrid)]
+		print("MEMPROD_CHECK blocking: max |diff| bgrid %g bgrid_o %g acc %g"%tuple(np.max(np.abs(a-b)) for a,b in zip(ref,[bgrid_new,bgrid_o,bgrid_acc])),flush=True)
+	bgrid,bgrid_o,bgrid_acc = jnp.array(bgrid_new),jnp.array(bgrid_o),jnp.array(bgrid_acc)
 	
 	#Regions the protein encloses (room for lipids that cannot be reached from outside the protein) are treated as
 	#protein above. With -enc auto they are membrane where the narrowest slice of the hydrophobic core has at least
@@ -1313,7 +1459,12 @@ def main():
 	#main minimisation loop
 	try_again=True
 	while try_again:
-		min_out = bfgs_minimize(nwrap_tpot, np.concatenate((np.array(new_zs.flatten()),np.array([start_z]))),jac = nwrap_grad,gtol=0.002,maxiter=iters)
+		x_start = np.concatenate((np.array(new_zs.flatten()),np.array([start_z])))
+		if(args.minimiser == "lbfgs"):
+			min_out = lbfgs_minimize(nwrap_tpot,x_start,jac = nwrap_grad,gtol=0.002,maxiter=iters,m=int(args.lbfgs_memory))
+		else:
+			min_out = bfgs_minimize(nwrap_tpot,x_start,jac = nwrap_grad,gtol=0.002,maxiter=iters)
+		print("Minimiser: "+args.minimiser+", iterations: "+str(min_out.nit)+", status: "+str(min_out.status),flush=True)
 		new_zs = min_out.x[:grid_size_x*grid_size_y*2]
 		start_z = min_out.x[-1]
 		new_zs = new_zs.reshape((grid_size_x,grid_size_y,2))
