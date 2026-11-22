@@ -915,6 +915,12 @@ def main():
 	x_ext = max(-jnp.min(surf_poses[:,0]),jnp.max(surf_poses[:,0]))+25
 	y_ext = max(-jnp.min(surf_poses[:,1]),jnp.max(surf_poses[:,1]))+25
 	grid_den = float(args.grid_density)
+	#The relaxation rings (get_all_loop_inds with 12 rings) need at least 26 cells across. A protein with little
+	#surface near the membrane (|z| < 50 A) gets a smaller grid and failed there, so the grid is widened to 26 cells
+	#in that case only; larger grids are unchanged.
+	min_ext = 13.5*grid_den
+	x_ext = max(x_ext,min_ext)
+	y_ext = max(y_ext,min_ext)
 	
 	rad = int(4.0/grid_den)
 	
