@@ -59,6 +59,8 @@ MemPrOD will output the following data:
   
 * Run_command.txt - A text file containing the full run command for later reference.
 
+* Energy.txt - The energy of the predicted membrane compared with a flat membrane and with no protein (see [Energy report](#energy-report-experimental)). Also printed in the log; with `-sl` it is only printed.
+
 * Topology - For atomistic inputs, a folder with the topology of each chain as on MemProtMD (topology_chain_X.png, topology.json, residues.csv; see `mempro-topology` in the MemPrO README): helices and strands as arrows by height, the number of transmembrane helices and strands, and the membrane lines following the predicted upper and lower surfaces. The spans are counted with MemPrO's flat boundaries: those of `info_rank_N.txt` if it is in the folder of the input, otherwise `-mt` about z = 0. A warning is printed if MemPrOD moved the membrane more than 2 A from there. Which spans are lipid-facing is a geometric estimate. Needs a MemPrO version with `mempro-topology`; turn off with `-notopo`.
 
 With `-dm` (two membranes) the output folder holds `Inner/` (the membrane at -z) and `Outer/` (the membrane at +z), each with all of the above for that membrane, its part of the protein (`protein_part.pdb`) and `Membrane_Data/Membrane_centre.npz`, and a `Deformations.pdb` with both membranes' surfaces in the input's frame.
@@ -73,6 +75,10 @@ MemPrOD takes the following flags as input:
 -o, --output : This is the name of the ouput directory. The code will default to a folder called Deformations in the directory where the code is run.
 
 -ni, --iters : Number of minimisation iterations. (Default: 300)
+
+-min, --minimiser : The minimiser, bfgs or lbfgs. bfgs keeps the dense inverse Hessian (memory and time per step grow with the square of the number of membrane segments); lbfgs keeps only the last `-lbfgs_m` steps, so each step is much cheaper and many runs can share a machine or GPU. The predicted deformations agree to within the run-to-run variation of the minimiser. (Default: bfgs)
+
+-lbfgs_m, --lbfgs_memory : With `-min lbfgs`, the number of past steps kept. (Default: 10)
 
 -ng, --grid_density : The spacing between membrane segments. It is highly recommended to use values above 2 as low values can quickly become very expensive. (Default: 3)
 
@@ -113,6 +119,19 @@ MemPrOD takes the following flags as input:
 -res_itp, --additional_residues_itp_file : An itp file containing descriptions of each additional residue added.
 
 -res_cg, --residue_cg_file : A folder containing files called RES.pdb where RES is the name of each additional residue added. RES.pdb should contain coarse graining information, example can be found on the GitHub repo for [CG2AT](https://github.com/owenvickery/cg2at/tree/master/database/fragments/martini_3-0_slipids/non_protein). This is only required for atomistic inputs with additional residues.
+
+## Energy report (experimental)
+
+After the minimisation MemPrOD writes the energy of the predicted membrane to `Energy.txt` (and to the log), against two references with the same grid and constants: the best flat membrane with the protein (moved along z to its lowest energy), and a flat membrane with no protein (`E_none`). All values are in the units of MemPrOD's potential.
+
+* E_def - The total energy of the deformed membrane, split into E_def_interaction (protein-membrane; = E_def_contact + E_def_block), E_def_neighbour (between neighbouring segments, `-k1`) and E_def_thickness (`-k2`).
+* E_def_block - The part of the interaction from membrane segments inside the protein. Membrane inside the protein is favourable in the potential, whether or not the protein belongs in a membrane, so it is reported separately.
+* E_flat, E_flat_contact, E_flat_block - The same for the best flat membrane, and the height of its centre.
+* E_none - A flat membrane with no protein; it does not depend on where the membrane is.
+* rel_flat, rel_def - E_flat and E_def relative to E_none; gain - E_def - E_flat, how much the deformation lowered the energy.
+* rel_flat_noblock, rel_def_noblock - rel_flat and rel_def without the block term.
+
+rel_def_noblock is the most useful for telling whether a protein belongs in a membrane: the more negative, the better the protein's surface suits the membrane once it is allowed to deform. On a calibration set of 20 transmembrane proteins and 15 soluble proteins (oriented by MemPrO), the membrane proteins gave rel_def_noblock of -1131 or lower and the soluble ones -102 or higher (or positive), so -500 separates them; it also recovered 10 of 16 mechanosensitive channels that MemPrO's flat-membrane score missed. This cutoff is provisional: it was set on a small set with the default `-ng`, `-k1` and `-k2`, and the values scale with the size of the protein's membrane-facing surface.
 
 ## An example
 
