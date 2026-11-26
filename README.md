@@ -3,7 +3,7 @@ MemPrOD: Membrane Protein Orientation and Distortions is a program that predicts
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/pstansfeld/MemPrO/blob/main/MemPrO_Colab.ipynb)
 
-Parameters from the following were used to help write this code:
+The following reference informed the parameters used in this code:
 
 **Martini forcefield:**
 Siewert J ; Marrink et al. “The MARTINI force field The MARTINI Force Field: Coarse Grained Model for Biomolecular Simulations”. In: (2007). [Paper](https://pubs.acs.org/doi/10.1021/jp071097f)
@@ -72,7 +72,7 @@ MemPrOD takes the following flags as input:
 
 -f, --file_name : (Required) This is the name of the input file for the protein that you wish to predict deformations for. It must be a .pdb. In future support for .gro files may be added. The protein can be either atomistic or coarse grained. The code should detect which it is and ignore unknown atom/bead types, however in the case of an error please let me know and send me the file which caused it. It is recommended that the PDB files had no missing atoms as this can cause the predictions to be of lower quality.
 
--o, --output : This is the name of the ouput directory. The code will default to a folder called Deformations in the directory where the code is run.
+-o, --output : This is the name of the output directory. The code will default to a folder called Deformations in the directory where the code is run.
 
 -ni, --iters : Number of minimisation iterations. (Default: 300)
 
@@ -84,13 +84,13 @@ MemPrOD takes the following flags as input:
 
 -ncav, --no_cavity_surface : This toggles the use of a more expensive but more accurate surface finder. By default the more expensive algorithm is used but this flag will turn it off.
 
--itp, --itp_file : Path to a Martini3 forcefield. By default this is the enviroment variable PATH_TO_MARTINI if set, otherwise the force field bundled with MemPrO
+-itp, --itp_file : Path to a Martini3 forcefield. By default this is the environment variable PATH_TO_MARTINI if set, otherwise the force field bundled with MemPrO
 
--cut, --cutoff : This is the cutoff for interactions between membrane segments and protein beads. It is not reccommended to change this. (Default: 12)
+-cut, --cutoff : This is the cutoff for interactions between membrane segments and protein beads. It is not recommended to change this. (Default: 12)
 
--k1, --k1_const : This scales the strength of membrane-membrane interactions. It is not reccommended to change this. (Default: 0.25)
+-k1, --k1_const : This scales the strength of membrane-membrane interactions. It is not recommended to change this. (Default: 0.25)
 
--k2, --k2_const : This scales the potential associated with compression and extension of the membrane. This is not generally required and should not be change unless you know what you're doing. (Default: 0)
+-k2, --k2_const : This scales the potential associated with compression and extension of the membrane. This is not generally required and should not be changed unless you know what you're doing. (Default: 0)
 
 -sm, --smooth : Width (Angstrom, Gaussian sigma) the upper and lower membrane surfaces are smoothed over after minimisation. Each surface is averaged only over the cells where its leaflet has membrane, so the protein does not pull the edge down. This removes steps between neighbouring membrane segments without changing the overall deformation; 0 turns it off. (Default: 5)
 
@@ -135,9 +135,9 @@ rel_def_noblock is the most useful for telling whether a protein belongs in a me
 
 ## An example
 
-MemPrOD is a very simply code to use, here we will go through a quick example. The first step will be to download an exmaple integral membrane protein, let us choose 4BWZ from the protein data bank. We will be downloading this from MemProtMD rather than the protein data bank. Go to [this page](https://memprotmd.bioch.ox.ac.uk/_ref/PDB/4bwz/_sim/4bwz_default_dppc/) and download "4bwz_default_dppc-head-contacts.pdb" rename this to "4bwz.pdb". Create a folder called "MemPrOD_Example" and place "4bwz.pdb" in this folder. **NOTE: If installing with pip then `mempro` and `MemPrOD` can be used to run the code instead of the full path as shown in the example and tutorials below. In a clone of the repositories the scripts are `mempro/MemPrO.py` (MemPrO) and `src/memprod/MemPrOD.py` (MemPrOD).**
+MemPrOD is a very simple program to use; here we will go through a quick example. First, download an example integral membrane protein, 4BWZ. We will download it from MemProtMD rather than the Protein Data Bank. Go to [this page](https://memprotmd.bioch.ox.ac.uk/_ref/PDB/4bwz/_sim/4bwz_default_dppc/) and download `4bwz_default_dppc-head-contacts.pdb`, then rename it to `4bwz.pdb`. Create a folder called `MemPrOD_Example` and place `4bwz.pdb` in it. **NOTE: If installing with pip, `mempro` and `MemPrOD` can be used to run the code instead of the full paths shown in the example and tutorials below. In a clone of the repositories, the scripts are `mempro/MemPrO.py` (MemPrO) and `src/memprod/MemPrOD.py` (MemPrOD).**
 
-Before we can predict deforamtions we will first need to orient the protein. If you are unfiamilar with MemPrO then take a look at the [MemPrO tutorials](https://github.com/pstansfeld/MemPrO/blob/main/MemPrO_tutorials.md). We can orient by running the following command in "MemPrOD_Example".
+Before predicting deformations, we first need to orient the protein. If you are unfamiliar with MemPrO, take a look at the [MemPrO tutorials](https://github.com/pstansfeld/MemPrO/blob/main/MemPrO_tutorials.md). We can orient the protein by running the following command in `MemPrOD_Example`.
 
 >python PATH/TO/MemPrO.py -f 4bwz.pdb
 
@@ -145,11 +145,11 @@ This will create a folder called "Orient", with the oriented protein and MemPrO'
 
 >python PATH/TO/MemPrOD.py -f Orient/Rank_1/oriented_rank_1.pdb
 
-This should take under a minute on a typical CPU and will create a folder called "Deformations". In this folder we can find "Deformations.pdb" Load "protein.pdb" (the protein without the dummy membrane) and "Deformations.pdb" from this folder in PyMOL. We can improve the clarity of the deformations by running the following command in PyMOL:
+This should take under a minute on a typical CPU and will create a folder called "Deformations". Open `protein.pdb` (the protein without the dummy membrane) and `Deformations.pdb` from this folder in PyMOL. We can improve the clarity of the deformations by running the following command in PyMOL:
 
 >spectrum b, red_white_blue,Deformations,minimum=-10,maximum=10
 
-We can compare this to the deformations shown on MemProtMD, and we see good agreement in general, with MemPrOD over prediciting thinning on the lower leaflet slightly.
+We can compare this with the deformations shown on MemProtMD. The results generally agree, although MemPrOD slightly overpredicts thinning on the lower leaflet.
 
 ![Alt text](Tutorial_Pics/Fig1.svg)
 
