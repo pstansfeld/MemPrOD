@@ -31,6 +31,26 @@ def pdb_atom_line(serial,name,resname,chain,resnum,x,y,z,occ=1.0,bfac=0.0):
 	name = name if len(name) == 4 else " "+name
 	return "ATOM  %5d %-4s %3s %1s%4d    %8.3f%8.3f%8.3f%6.2f%6.2f\n"%(serial%100000,name[:4],resname[:3],chain[:1],resnum%10000,x,y,z,occ,bfac)
 
+def dual_membrane_forwarded_args(argv):
+	skip = {"-sl":0,"--streamlined":0,"-f":1,"--file_name":1,"-o":1,"--output":1,"-dm":1,"--dual_membrane":1,"-mt":1,"--membrane_thickness":1,"-mt_o":1,"--outer_membrane_thickness":1}
+	forwarded = []
+	i = 1
+	while i < len(argv):
+		arg = argv[i]
+		flag, has_value, _ = arg.partition("=")
+		if flag in skip:
+			i += 1 + (0 if has_value else skip[flag])
+			continue
+		forwarded.append(arg)
+		i += 1
+	return forwarded
+
+def option_was_given(argv, *flags):
+	return any(arg.partition("=")[0] in flags for arg in argv[1:])
+
+def contact_weight(distance_nm):
+	return jnp.exp(-distance_nm*distance_nm)
+
 #Double membranes (-dm): MemPrOD's model is one flat membrane at z = 0, so each membrane of a periplasm-spanning
 #complex is predicted on its own. The part of the protein within reach of the membrane is cut out and shifted so that
 #membrane is at z = 0, and MemPrOD is run on it with the grid kept in the protein's x,y axes (-norot), so both
@@ -49,7 +69,7 @@ def read_mempro_remarks(args):
 	def value(pattern):
 		match = re.search(pattern+r"[^:]*:\s*([-+0-9.eE]+)",remarks)
 		return float(match.group(1)) if match else None
-	given = lambda *flags: any(a in flags for a in sys.argv)
+	given = lambda *flags: option_was_given(sys.argv,*flags)
 	thickness = value(r"\(Inner\) Membrane Thickness")
 	distance = value(r"Iter-Membrane distance")
 	outer = value(r"Outer Membrane Thickness")
@@ -116,14 +136,7 @@ def dual_membrane_runs(args,orient_dir):
 		exit()
 	lines = [l for l in open(args.file_name) if l.startswith(("ATOM","HETATM"))]
 	#Options passed on to each membrane's run, without the ones set here
-	skip = {"-sl":0,"--streamlined":0,"-f":1,"--file_name":1,"-o":1,"--output":1,"-dm":1,"--dual_membrane":1,"-mt":1,"--membrane_thickness":1,"-mt_o":1,"--outer_membrane_thickness":1}
-	argv,i = [],1
-	while i < len(sys.argv):
-		if sys.argv[i] in skip:
-			i += 1+skip[sys.argv[i]]
-			continue
-		argv.append(sys.argv[i])
-		i += 1
+	argv = dual_membrane_forwarded_args(sys.argv)
 	membranes = [("Inner",-dist/2,float(args.membrane_thickness)),("Outer",dist/2,float(args.outer_membrane_thickness or args.membrane_thickness))]
 	surfaces = []
 	for name,centre,thick in membranes:
@@ -650,14 +663,14 @@ def main():
 		mem_structure = jnp.array([meml,meml+h1_w,meml+h2_w+h1_w,meml+h2_w+h1_w+h3_w,meml+h2_w+h1_w+h3_w+l_w,meml+h2_w+h1_w+2*h3_w+l_w,meml+2*h2_w+h1_w+2*h3_w+l_w,meml+2*h2_w+2*h1_w+2*h3_w+l_w])
 		return mem_structure
 	
-	#A fucntion that reads a martini file to get interaction strengths
+	#A function that reads a martini file to get interaction strengths
 	def get_int_strength(bead_1,bead_2,martini_file):
 		if(bead_2 == "GHOST"):
 			return 0
 		#Same lookup as MemPrO's, which reads the ~16 MB force field once instead of once per bead pair
 		return ori.get_int_strength(bead_1,bead_2,martini_file)
 		
-	#Gets the interations between protein beads and the enviroment. This is used to create the mean fields		
+	#Gets the interactions between protein beads and the environment. This is used to create the mean fields
 	def get_mem_def(martini_file):
 		Beadtype_names = list(Beadtype.keys())
 		no_beadtypes = len(Beadtype_names)
@@ -1279,7 +1292,6 @@ def main():
 	#Vectorised over protein beads and the 40 tail samples; grid cells are processed in batches to bound memory
 	@jax.jit
 	def calc_contacts(new_zs,poses,zdisp,xs,ys):
-		mindd = 3
 		cell_i,cell_j = np.meshgrid(np.arange(new_zs.shape[0]),np.arange(new_zs.shape[1]),indexing="ij")
 		cell_i,cell_j = jnp.array(cell_i.flatten()),jnp.array(cell_j.flatten())
 		def cell(ind):
@@ -1290,12 +1302,12 @@ def main():
 			pos2 = jnp.array([xs[ind1],ys[ind2],z+mt/2.0+4+zdisp])
 			dist1 = jnp.linalg.norm(poses-pos1,axis=1)/10
 			dist2 = jnp.linalg.norm(poses-pos2,axis=1)/10
-			bfacH = jnp.exp(-jnp.maximum(dist1*dist1,mindd))*bgrid_weight(ind1,ind2,z-mt/2.0+4+zdisp)+jnp.exp(-jnp.maximum(dist2*dist2,mindd))*bgrid_weight(ind1,ind2,z-mt/2.0-4+zdisp)
+			bfacH = contact_weight(dist1)*bgrid_weight(ind1,ind2,z-mt/2.0+4+zdisp)+contact_weight(dist2)*bgrid_weight(ind1,ind2,z-mt/2.0-4+zdisp)
 			zscan = jnp.linspace(pos1[2],pos2[2],40)
 			pos3 = jnp.stack((jnp.full(40,pos1[0]),jnp.full(40,pos1[1]),zscan),axis=1)
 			dist3 = jnp.linalg.norm(poses[:,None,:]-pos3[None,:,:],axis=2)/10
 			weights = jax.vmap(bgrid_weight,in_axes=(None,None,0))(ind1,ind2,zscan)
-			bfacT = jnp.sum(jnp.exp(-jnp.maximum(dist3*dist3,mindd))*weights[None,:],axis=1)
+			bfacT = jnp.sum(contact_weight(dist3)*weights[None,:],axis=1)
 			return bfacH,bfacT
 		bfacsH,bfacsT = jax.lax.map(cell,jnp.arange(cell_i.shape[0]),batch_size=16)
 		return jnp.sum(bfacsH,axis=0),jnp.sum(bfacsT,axis=0)
